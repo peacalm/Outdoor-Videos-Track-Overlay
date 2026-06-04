@@ -27,6 +27,7 @@
             "cumulative_descent_m": float,   # 累计下降高度（米）
             "cumulative_duration_s": float,  # 累计用时（秒，从轨迹起点到当前点）
             "grade_percent": float,        # 当前坡度 (%)
+            "grade_degree": float,         # 当前坡度（角度，-90~+90，单位 °）
             "pace_min_per_km": float,      # 当前配速 (min/km)
             "speed_km_per_h": float        # 当前速度 (km/h)
         },
@@ -365,8 +366,11 @@ def _build_result(points, times, smooth_window=5):
         # 坡度（grade）= 垂直变化 / 水平距离 * 100%
         win_dist_m = win_dist_km * 1000.0
         grade = 0.0
+        grade_degree = 0.0
         if win_dist_m > 0:
             grade = (win_elev_diff / win_dist_m) * 100.0
+            # 坡度角度 = arctan(垂直变化 / 水平距离)，范围 -90~+90
+            grade_degree = math.degrees(math.atan2(win_elev_diff, win_dist_m))
 
         # 当前配速 & 速度（基于窗口内的平均值）
         if win_time_s > 0 and win_dist_km > 0:
@@ -386,6 +390,7 @@ def _build_result(points, times, smooth_window=5):
             "cumulative_descent_m": total_descent,
             "cumulative_duration_s": cum_duration,
             "grade_percent": grade,
+            "grade_degree": grade_degree,
             "pace_min_per_km": pace_min_per_km,
             "speed_km_per_h": speed_kmh,
         })
