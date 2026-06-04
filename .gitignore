@@ -1,5 +1,16 @@
-input*
-output*
+*input*
+*output*
 *pyc
 venv
 .DS_store
+
+# 视频文件
+*.mp4
+*.mov
+*.m4v
+*.avi
+*.mkv
+
+# 轨迹文件
+*.kml
+*.gpx
