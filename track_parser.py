@@ -25,6 +25,7 @@
             "cumulative_distance_km": float,  # 累计距离（公里）
             "cumulative_ascent_m": float,    # 累计爬升高度（米）
             "cumulative_descent_m": float,   # 累计下降高度（米）
+            "cumulative_duration_s": float,  # 累计用时（秒，从轨迹起点到当前点）
             "grade_percent": float,        # 当前坡度 (%)
             "pace_min_per_km": float,      # 当前配速 (min/km)
             "speed_km_per_h": float        # 当前速度 (km/h)
@@ -308,6 +309,7 @@ def _build_result(points, times):
     max_elevation = float('-inf')
     min_elevation = float('inf')
     cum_dist = 0.0
+    cum_duration = 0.0
 
     for i in range(n):
         lon, lat, ele = points[i]
@@ -337,6 +339,7 @@ def _build_result(points, times):
                 seg_time_s = 0.0
 
         total_distance = cum_dist
+        cum_duration += seg_time_s
 
         # 坡度（grade）= 垂直变化 / 水平距离 * 100%
         # 水平距离用球面距离米近似
@@ -362,6 +365,7 @@ def _build_result(points, times):
             "cumulative_distance_km": cum_dist,
             "cumulative_ascent_m": total_ascent,
             "cumulative_descent_m": total_descent,
+            "cumulative_duration_s": cum_duration,
             "grade_percent": grade,
             "pace_min_per_km": pace_min_per_km,
             "speed_km_per_h": speed_kmh,
