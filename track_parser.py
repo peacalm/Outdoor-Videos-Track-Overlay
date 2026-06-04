@@ -23,6 +23,8 @@
             "elevation": float,            # 海拔高度（米）
             "time": datetime,              # 时间（datetime 对象）
             "cumulative_distance_km": float,  # 累计距离（公里）
+            "cumulative_ascent_m": float,    # 累计爬升高度（米）
+            "cumulative_descent_m": float,   # 累计下降高度（米）
             "grade_percent": float,        # 当前坡度 (%)
             "pace_min_per_km": float,      # 当前配速 (min/km)
             "speed_km_per_h": float        # 当前速度 (km/h)
@@ -358,6 +360,8 @@ def _build_result(points, times):
             "elevation": ele,
             "time": times[i],
             "cumulative_distance_km": cum_dist,
+            "cumulative_ascent_m": total_ascent,
+            "cumulative_descent_m": total_descent,
             "grade_percent": grade,
             "pace_min_per_km": pace_min_per_km,
             "speed_km_per_h": speed_kmh,
@@ -423,17 +427,6 @@ def parse_track_file(track_file):
         raise ValueError("不支持的轨迹文件格式: %s（仅支持 .kml / .gpx）" % ext)
 
     return _build_result(points, times)
-
-
-def find_track_file(input_dir, preferred_exts=('.kml', '.gpx')):
-    """在输入目录中查找轨迹文件，返回找到的第一个匹配路径或 None"""
-    if not os.path.isdir(input_dir):
-        return None
-    for ext in preferred_exts:
-        for f in sorted(os.listdir(input_dir)):
-            if f.lower().endswith(ext):
-                return os.path.join(input_dir, f)
-    return None
 
 
 if __name__ == "__main__":
