@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 程序入口：整理输入（选择轨迹文件、解析轨迹、匹配视频），
-并调度 video_watermark 模块为视频批量添加轨迹水印。
+并调度 video_watermarker 模块为视频批量添加轨迹水印。
 """
 
 import argparse
@@ -10,7 +10,7 @@ import os
 
 from track_parser import parse_track_file
 from video_meta_parser import extract_creation_time_from_metadata
-from video_watermark import process_video
+from video_watermarker import process_video
 
 
 def select_track_file(input_dir, preferred_exts=('.kml', '.gpx')):
