@@ -27,6 +27,7 @@
             "cumulative_descent_m": float,   # 累计下降高度（米）
             "cumulative_duration_s": float,  # 累计用时（秒，从轨迹起点到当前点）
             "grade_percent": float,        # 当前坡度 (%)
+            "grade_degree": float,         # 当前坡度（角度，-90~+90，单位 °）
             "pace_min_per_km": float,      # 当前配速 (min/km)
             "speed_km_per_h": float        # 当前速度 (km/h)
         },
@@ -296,10 +297,18 @@ def _parse_gpx(gpx_file):
 # 计算派生数据（summary & 各点的坡度/配速/速度等）
 # ---------------------------------------------------------------------------
 
-def _build_result(points, times):
-    """根据原始 points/times 构建统一格式的解析结果"""
+def _build_result(points, times, smooth_window=5):
+    """根据原始 points/times 构建统一格式的解析结果
+
+    smooth_window: 计算当前点坡度/配速/速度时所使用的最近点数量（>=2）。
+                   为减小相邻两点带来的抖动误差，默认使用最近 5 个点的
+                   累计数据来计算窗口内的平均坡度与配速。
+    """
     if not points or not times:
         raise ValueError("轨迹点或时间为空")
+
+    if smooth_window < 2:
+        smooth_window = 2
 
     n = len(points)
     result_points = []
@@ -318,7 +327,7 @@ def _build_result(points, times):
         if ele < min_elevation:
             min_elevation = ele
 
-        # 当前点距上一点的距离 / 时间差
+        # 当前点距上一点的距离 / 时间差（仅用于累计量）
         if i == 0:
             seg_dist_km = 0.0
             seg_elev_diff = 0.0
@@ -341,19 +350,33 @@ def _build_result(points, times):
         total_distance = cum_dist
         cum_duration += seg_time_s
 
-        # 坡度（grade）= 垂直变化 / 水平距离 * 100%
-        # 水平距离用球面距离米近似
-        seg_dist_m = seg_dist_km * 1000.0
-        grade = 0.0
-        if seg_dist_m > 0:
-            grade = (seg_elev_diff / seg_dist_m) * 100.0
-
-        # 当前配速 & 速度（本点使用前一段的速度平滑）
-        if seg_time_s > 0 and seg_dist_km > 0:
-            speed_kmh = seg_dist_km / (seg_time_s / 3600.0)
-            pace_min_per_km = seg_time_s / 60.0 / seg_dist_km
+        # 使用最近 smooth_window 个点的窗口数据计算坡度/配速/速度，减小误差。
+        # 窗口起点（含当前点共 smooth_window 个点）
+        start = max(0, i - (smooth_window - 1))
+        if start < i:
+            start_pt = result_points[start]
+            win_dist_km = cum_dist - start_pt["cumulative_distance_km"]
+            win_time_s = cum_duration - start_pt["cumulative_duration_s"]
+            win_elev_diff = ele - start_pt["elevation"]
         else:
-            # 用总平均代替
+            win_dist_km = 0.0
+            win_time_s = 0.0
+            win_elev_diff = 0.0
+
+        # 坡度（grade）= 垂直变化 / 水平距离 * 100%
+        win_dist_m = win_dist_km * 1000.0
+        grade = 0.0
+        grade_degree = 0.0
+        if win_dist_m > 0:
+            grade = (win_elev_diff / win_dist_m) * 100.0
+            # 坡度角度 = arctan(垂直变化 / 水平距离)，范围 -90~+90
+            grade_degree = math.degrees(math.atan2(win_elev_diff, win_dist_m))
+
+        # 当前配速 & 速度（基于窗口内的平均值）
+        if win_time_s > 0 and win_dist_km > 0:
+            speed_kmh = win_dist_km / (win_time_s / 3600.0)
+            pace_min_per_km = win_time_s / 60.0 / win_dist_km
+        else:
             speed_kmh = 0.0
             pace_min_per_km = 0.0
 
@@ -367,6 +390,7 @@ def _build_result(points, times):
             "cumulative_descent_m": total_descent,
             "cumulative_duration_s": cum_duration,
             "grade_percent": grade,
+            "grade_degree": grade_degree,
             "pace_min_per_km": pace_min_per_km,
             "speed_km_per_h": speed_kmh,
         })
@@ -417,8 +441,12 @@ def _build_result(points, times):
 # 对外主接口
 # ---------------------------------------------------------------------------
 
-def parse_track_file(track_file):
-    """解析轨迹文件（支持 .kml / .gpx），返回统一格式结果"""
+def parse_track_file(track_file, smooth_window=5):
+    """解析轨迹文件（支持 .kml / .gpx），返回统一格式结果
+
+    smooth_window: 计算坡度/配速/速度时使用的最近点数量（默认 5），
+                   用于减小仅依赖相邻两点带来的抖动误差。
+    """
     if not os.path.isfile(track_file):
         raise FileNotFoundError("轨迹文件不存在: %s" % track_file)
 
@@ -430,7 +458,7 @@ def parse_track_file(track_file):
     else:
         raise ValueError("不支持的轨迹文件格式: %s（仅支持 .kml / .gpx）" % ext)
 
-    return _build_result(points, times)
+    return _build_result(points, times, smooth_window=smooth_window)
 
 
 if __name__ == "__main__":
