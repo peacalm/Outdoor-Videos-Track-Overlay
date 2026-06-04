@@ -28,9 +28,9 @@ from video_meta_parser import (
 
 # CHINESE_FONT_PATH = "/System/Library/Fonts/Hiragino Sans GB.ttc"
 # CHINESE_FONT_PATH = "/System/Library/Fonts/STHeiti Light.ttc"
-# CHINESE_FONT_PATH = "/System/Library/Fonts/STHeiti Medium.ttc"
+CHINESE_FONT_PATH = "/System/Library/Fonts/STHeiti Medium.ttc"
 # CHINESE_FONT_PATH = "/System/Library/Fonts/PingFang Bold.ttc"
-CHINESE_FONT_PATH = "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc"
+# CHINESE_FONT_PATH = "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc"
 
 
 # 计算轨迹的边界，用于坐标映射
@@ -128,12 +128,18 @@ def add_video_watermark(input_video, output_video, track_data):
     info_watermark_width = watermark_width + 100 # 里程爬升等信息水印宽度 加大一点
     info_watermark_x = width - info_watermark_width - right_border_width 
     info_watermark_y = time_watermark_y - info_watermark_height  # 时间水印上面
-    
+
+    # 详细运行信息水印（坡度/配速/累计用时），位于里程信息行上面
+    info2_watermark_height = 40
+    info2_watermark_width = info_watermark_width
+    info2_watermark_x = info_watermark_x
+    info2_watermark_y = info_watermark_y - info2_watermark_height
+
     # 海拔高度曲线水印大小和位置（右下角）
     elevation_watermark_width = watermark_width
     elevation_watermark_height = 150
     elevation_watermark_x = width - elevation_watermark_width - right_border_width
-    elevation_watermark_y = info_watermark_y - elevation_watermark_height - 5
+    elevation_watermark_y = info2_watermark_y - elevation_watermark_height - 5
     
 
     # 轨迹形状水印高度（根据长宽比自适应计算）
@@ -268,7 +274,11 @@ def add_video_watermark(input_video, output_video, track_data):
         current_point = points[video_position_idx]
         distance_km = current_point["cumulative_distance_km"]
         elevation_gain = current_point["cumulative_ascent_m"]
-        
+        # 更详细的当前运行信息
+        grade_percent = current_point["grade_percent"]            # 当前坡度 (%)
+        pace_min_per_km = current_point["pace_min_per_km"]        # 当前配速 (min/km)
+        cumulative_duration_s = current_point["cumulative_duration_s"]  # 累计用时（秒）
+
         # 创建时间水印
         time_watermark = np.zeros((time_watermark_height, time_watermark_width, 4), dtype=np.uint8)
         time_watermark[:,:,3] = 0
@@ -276,6 +286,10 @@ def add_video_watermark(input_video, output_video, track_data):
         # 创建信息水印
         info_watermark = np.zeros((info_watermark_height, info_watermark_width, 4), dtype=np.uint8)
         info_watermark[:,:,3] = 0
+
+        # 创建详细运行信息水印（坡度/配速/累计用时）
+        info2_watermark = np.zeros((info2_watermark_height, info2_watermark_width, 4), dtype=np.uint8)
+        info2_watermark[:,:,3] = 0
 
         def get_chinese_text_size(text, font_path, font_size, thickness=0):
             """
@@ -367,8 +381,29 @@ def add_video_watermark(input_video, output_video, track_data):
         if video_time:
             # 从extract_creation_time_from_metadata函数获取的时间已经是UTC+8
             time_str = (video_time + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M")
-            # 距离、爬升、海拔高度 - 合并成一行显示
-            info_str = f"里程{distance_km:.1f}km 爬升{elevation_gain:.0f}m 海拔{elevation:.0f}m"
+            # 里程、爬升、海拔高度 - 显示在上面一行
+            info2_str = f"里程{distance_km:.1f}km 爬升{elevation_gain:.0f}m 海拔{elevation:.0f}m"
+
+            # 更详细的当前运行信息：坡度、配速、累计用时 - 显示在下面一行
+            # 累计用时格式化为 H:MM:SS / MM:SS
+            total_sec = int(round(cumulative_duration_s))
+            h, rem = divmod(total_sec, 3600)
+            m, s = divmod(rem, 60)
+            if h > 0:
+                duration_str = f"{h}:{m:02d}:{s:02d}"
+            else:
+                duration_str = f"{m:02d}:{s:02d}"
+            # 配速格式化为 M'SS"（0 表示无有效数据）
+            if pace_min_per_km > 0:
+                pace_m = int(pace_min_per_km)
+                pace_s = int(round((pace_min_per_km - pace_m) * 60))
+                if pace_s == 60:
+                    pace_m += 1
+                    pace_s = 0
+                pace_str = f"{pace_m}'{pace_s:02d}\""
+            else:
+                pace_str = "--'--\""
+            info_str = f"坡度{grade_percent:.0f}% 配速{pace_str}/km 用时{duration_str}"
 
             # 字体大小
             font_scale = 0.8
@@ -379,9 +414,18 @@ def add_video_watermark(input_video, output_video, track_data):
             (info_width, info_height), _ = get_chinese_text_size(info_str, CHINESE_FONT_PATH, font_size, font_thickness)
             info_x = info_watermark_width - info_width - 10
             info_y = (info_watermark_height + info_height) // 2
+            (info2_width, info2_height), _ = get_chinese_text_size(info2_str, CHINESE_FONT_PATH, font_size, font_thickness)
+            info2_x = info2_watermark_width - info2_width - 10
+            info2_y = (info2_watermark_height + info2_height) // 2
             (time_width, time_height), _ = get_chinese_text_size(time_str, CHINESE_FONT_PATH, font_size, font_thickness)
             time_x = time_watermark_width - time_width - 10
             time_y = (time_watermark_height + time_height) // 2
+
+        # 绘制详细运行信息文字（带白色边框）
+        put_text_with_border(
+            info2_watermark, info2_str, (info2_x, info2_y),
+            cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0, 200), (255, 255, 255, 255), font_thickness
+        )
 
         # 绘制信息文字（带白色边框）
         put_text_with_border(
@@ -408,6 +452,13 @@ def add_video_watermark(input_video, output_video, track_data):
                 frame[info_watermark_y:info_watermark_y+info_watermark_height, info_watermark_x:info_watermark_x+info_watermark_width, c] * \
                 (1 - info_watermark[:,:,3]/255.0) + \
                 info_watermark[:,:,c] * (info_watermark[:,:,3]/255.0)
+
+        # 将详细运行信息水印叠加到帧上
+        for c in range(0, 3):
+            frame[info2_watermark_y:info2_watermark_y+info2_watermark_height, info2_watermark_x:info2_watermark_x+info2_watermark_width, c] = \
+                frame[info2_watermark_y:info2_watermark_y+info2_watermark_height, info2_watermark_x:info2_watermark_x+info2_watermark_width, c] * \
+                (1 - info2_watermark[:,:,3]/255.0) + \
+                info2_watermark[:,:,c] * (info2_watermark[:,:,3]/255.0)
 
         # 将时间水印叠加到帧上
         for c in range(0, 3):
