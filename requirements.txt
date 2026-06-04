@@ -1,0 +1,15 @@
+# 核心依赖（必需）
+numpy
+opencv-python
+Pillow
+
+# 轨迹海拔中值滤波（track_parser.py，可选，缺失时自动跳过滤波）
+scipy
+
+# 视频创建时间/位置提取的备选方案（video_meta_parser.py，可选）
+# 优先使用系统 ffprobe；以下为降级备选
+moviepy
+mutagen
+
+# 注意：本项目还依赖系统命令行工具 ffmpeg / ffprobe，
+# 需通过系统包管理器单独安装（如 macOS: brew install ffmpeg）。
