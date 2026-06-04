@@ -5,14 +5,14 @@ import multiprocessing
 import os
 import re
 import subprocess
-import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-from scipy.signal import medfilt
+
+from track_parser import parse_track_file, find_track_file
 
 # CHINESE_FONT_PATH = "/System/Library/Fonts/Hiragino Sans GB.ttc"
 # CHINESE_FONT_PATH = "/System/Library/Fonts/STHeiti Light.ttc"
@@ -62,84 +62,6 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     # 距离（单位：公里）
     distance = R * c
     return distance
-
-
-# 从KML文件获取轨迹点及其时间信息
-def parse_kml_with_time(kml_file):
-    tree = ET.parse(kml_file)
-    root = tree.getroot()
-    
-    # 命名空间处理
-    namespaces = {
-        'kml': 'http://www.opengis.net/kml/2.2',
-        'gx': 'http://www.google.com/kml/ext/2.2'
-    }
-    
-    # 获取轨迹点和时间信息
-    track_points = []
-    track_times = []
-    elevations = []
-
-    
-    # 首先尝试从gx:Track获取轨迹点
-    track = root.find('.//kml:Folder[@id="TbuluTrackFolder"]/kml:Placemark/gx:Track', namespaces)
-    if track:
-        # 尝试不同的方式查找when标签
-        times = track.findall('when')
-        if not times:
-            times = track.findall('{http://www.opengis.net/kml/2.2}when')
-        if not times:
-            times = track.findall('kml:when', namespaces)
-        if not times:
-            print(f"警告: gx:Track中未找到时间信息，轨迹点数量: {len(track_points)}")
-            raise ValueError("轨迹点时间为空")
-
-        coords = track.findall('gx:coord', namespaces)
-        if not coords:
-            raise ValueError("轨迹点为空")
-        
-        for coord in coords:
-            # 解析坐标格式: 经度 纬度 海拔
-            parts = coord.text.strip().split()
-            if len(parts) >= 3:
-                lon = float(parts[0])
-                lat = float(parts[1])
-                elevation = float(parts[2])
-                elevations.append(elevation)
-                track_points.append((lon, lat, elevation))
-            else:
-                raise ValueError("轨迹点坐标格式错误")
-    
-        for time_elem in times:
-            # 解析时间格式: 2026-04-06T06:45:14Z
-            try:
-                dt = datetime.strptime(time_elem.text, "%Y-%m-%dT%H:%M:%SZ")
-                track_times.append(dt)
-            except Exception as e:
-                raise ValueError("轨迹点时间格式错误: %s" % e)
-    
-    # 对海拔进行中值滤波
-    filter_window = 13
-    elevations = medfilt(elevations, filter_window)
-    # plot_elevation_profile(elevations, [i[2] for i in track_points])
-    
-    # 重新组合轨迹点
-    for i in range(len(track_points)):
-        track_points[i] = (track_points[i][0], track_points[i][1], elevations[i])
-
-    # 计算累计距离和爬升高度
-    cumulative_distance = 0.0
-    cumulative_elevation = 0.0
-    for i in range(1, len(track_points)):
-        distance = calculate_distance(track_points[i-1][0], track_points[i-1][1], track_points[i][0], track_points[i][1])
-        cumulative_distance += distance
-        diff = track_points[i][2] - track_points[i-1][2]
-        if diff > 0:
-            cumulative_elevation += diff
-    print(f"计算得 轨迹路程: {cumulative_distance}")
-    print(f"计算得 轨迹爬升高度: {cumulative_elevation}")
-
-    return track_points, track_times
 
 
 # 计算轨迹的边界，用于坐标映射
@@ -967,19 +889,26 @@ def main():
     # 确保输出目录存在
     os.makedirs(output_dir, exist_ok=True)
     
-    # 找到KML轨迹文件
-    kml_files = [f for f in os.listdir(input_dir) if f.endswith('.kml')]
-    if not kml_files:
-        print("未找到KML轨迹文件")
+    # 查找轨迹文件（支持 .kml / .gpx）
+    track_file = find_track_file(input_dir)
+    if not track_file:
+        print("未找到轨迹文件（支持 .kml / .gpx）")
         return
     
-    kml_file = os.path.join(input_dir, kml_files[0])
-    print(f"使用轨迹文件: {kml_file}")
+    print(f"使用轨迹文件: {track_file}")
     
-    # 解析KML文件获取轨迹点和时间
-    track_points, track_times = parse_kml_with_time(kml_file)
+    # 解析轨迹文件获取轨迹点和时间（统一格式）
+    track_data = parse_track_file(track_file)
+    track_points = track_data["raw_points"]
+    track_times = track_data["raw_times"]
     print(f"轨迹点数量: {len(track_points)}")
     print(f"轨迹时间点数量: {len(track_times)}")
+    summary = track_data["summary"]
+    print(f"总距离: {summary['total_distance_km']:.2f} km, "
+          f"爬升: {summary['total_ascent_m']:.0f} m, "
+          f"下降: {summary['total_descent_m']:.0f} m, "
+          f"最高海拔: {summary['max_elevation_m']:.0f} m, "
+          f"用时: {summary['total_duration_s']:.0f} s")
     if not track_points or not track_times:
         print("轨迹点或时间点为空")
         return
