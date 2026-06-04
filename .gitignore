@@ -2,3 +2,4 @@ input*
 output*
 *pyc
 venv
+.DS_store
