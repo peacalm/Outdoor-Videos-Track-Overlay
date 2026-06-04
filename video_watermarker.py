@@ -275,7 +275,7 @@ def add_video_watermark(input_video, output_video, track_data):
         distance_km = current_point["cumulative_distance_km"]
         elevation_gain = current_point["cumulative_ascent_m"]
         # 更详细的当前运行信息
-        grade_percent = current_point["grade_percent"]            # 当前坡度 (%)
+        grade_degree = current_point["grade_degree"]              # 当前坡度（角度 °）
         pace_min_per_km = current_point["pace_min_per_km"]        # 当前配速 (min/km)
         cumulative_duration_s = current_point["cumulative_duration_s"]  # 累计用时（秒）
 
@@ -403,7 +403,7 @@ def add_video_watermark(input_video, output_video, track_data):
                 pace_str = f"{pace_m}'{pace_s:02d}\""
             else:
                 pace_str = "--'--\""
-            info_str = f"坡度{grade_percent:.0f}% 配速{pace_str}/km 用时{duration_str}"
+            info_str = f"坡度{grade_degree:.0f}° 配速{pace_str}/km 用时{duration_str}"
 
             # 字体大小
             font_scale = 0.8
