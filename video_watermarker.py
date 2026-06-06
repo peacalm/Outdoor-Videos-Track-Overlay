@@ -118,7 +118,7 @@ def add_video_watermark(input_video, output_video, track_data):
     right_border_width = 60
     
     # 时间水印位置和大小（底部右下角）
-    time_watermark_height = 80
+    time_watermark_height = 40
     time_watermark_width = watermark_width  
     time_watermark_x = width - time_watermark_width - right_border_width 
     time_watermark_y = height - time_watermark_height - 20  # 底边界
@@ -403,7 +403,9 @@ def add_video_watermark(input_video, output_video, track_data):
                 pace_str = f"{pace_m}'{pace_s:02d}\""
             else:
                 pace_str = "--'--\""
-            info_str = f"坡度{grade_degree:.0f}° 配速{pace_str}/km 用时{duration_str}"
+            info_str = f"坡度{grade_degree:.0f}° 配速{pace_str}/km"
+            # 将用时信息加入时间行，并放在时间前面
+            time_str = f"用时{duration_str} {time_str}"
 
             # 字体大小
             font_scale = 0.8
