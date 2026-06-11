@@ -165,17 +165,17 @@ def add_video_watermark(input_video, output_video, track_data):
     video_time = extract_creation_time(input_video)
     
     # 找到最接近的轨迹点
-    print(f"视频时间: {video_time}")
-    print(f"轨迹时间点数量: {len(track_times)}")
+    # print(f"视频时间: {video_time}")
+    # print(f"轨迹时间点数量: {len(track_times)}")
     
     # 从视频元数据中提取拍摄位置
 
     video_position_idx_by_time = find_closest_track_point_by_time(video_time, track_points, track_times)
-    print(f"时间匹配索引: {video_position_idx_by_time}")
+    # print(f"时间匹配索引: {video_position_idx_by_time}")
     video_position_idx = video_position_idx_by_time
     
     video_lon, video_lat, elevation = track_points[video_position_idx]
-    print(f"视频位置: ({video_lon}, {video_lat})")
+    # print(f"视频位置: ({video_lon}, {video_lat})")
     
     # 处理每一帧
     for frame_idx in range(total_frames):
