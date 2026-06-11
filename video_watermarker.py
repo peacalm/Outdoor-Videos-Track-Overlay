@@ -28,9 +28,15 @@ from video_meta_parser import (
 
 # CHINESE_FONT_PATH = "/System/Library/Fonts/Hiragino Sans GB.ttc"
 # CHINESE_FONT_PATH = "/System/Library/Fonts/STHeiti Light.ttc"
-CHINESE_FONT_PATH = "/System/Library/Fonts/STHeiti Medium.ttc"
+# CHINESE_FONT_PATH = "/System/Library/Fonts/STHeiti Medium.ttc"
 # CHINESE_FONT_PATH = "/System/Library/Fonts/PingFang Bold.ttc"
 # CHINESE_FONT_PATH = "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc"
+
+# Hiragino Sans GB 是 ttc 字体集合，index=2 是 W6 粗体，且完整支持简繁中文。
+CHINESE_FONT_PATH = "/System/Library/Fonts/Hiragino Sans GB.ttc"
+CHINESE_FONT_INDEX = 2
+# 加载中文字体失败时使用的兜底字体路径
+DEFAULT_CHINESE_FONT_PATH = "/System/Library/Fonts/STHeiti Medium.ttc"
 
 
 # 计算轨迹的边界，用于坐标映射
@@ -310,7 +316,7 @@ def add_video_watermark(input_video, output_video, track_data):
             draw = ImageDraw.Draw(temp_img)
             
             # 加载中文字体
-            font = ImageFont.truetype(font_path, font_size)
+            font = ImageFont.truetype(font_path, font_size, index=CHINESE_FONT_INDEX)
             
             # 获取文本边界框（无边框时的尺寸）
             bbox = draw.textbbox((0, 0), text, font=font)
@@ -340,9 +346,9 @@ def add_video_watermark(input_video, output_video, track_data):
             draw = ImageDraw.Draw(pil_img)
             font_size = int(font_scale * 30)
             try:
-                pil_font = ImageFont.truetype(CHINESE_FONT_PATH, font_size)
+                pil_font = ImageFont.truetype(CHINESE_FONT_PATH, font_size, index=CHINESE_FONT_INDEX)
             except:
-                pil_font = ImageFont.truetype("/System/Library/Fonts/STHeiti Light.ttc", font_size)
+                pil_font = ImageFont.truetype(DEFAULT_CHINESE_FONT_PATH, font_size)
             
             # 🔧 关键修正：将左下角坐标转换为左上角坐标
             x_bottom, y_bottom = org  # 左下角坐标（基线位置）
