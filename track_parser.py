@@ -351,8 +351,14 @@ def _build_result(points, times, smooth_window=5):
         cum_duration += seg_time_s
 
         # 使用最近 smooth_window 个点的窗口数据计算坡度/配速/速度，减小误差。
+        # 同时要求窗口起点距当前点至少 10 米，避免短距离抖动放大坡度/配速。
         # 窗口起点（含当前点共 smooth_window 个点）
         start = max(0, i - (smooth_window - 1))
+        min_window_distance_m = 10.0
+        while (start > 0
+               and (cum_dist - result_points[start]["cumulative_distance_km"]) * 1000.0
+                   < min_window_distance_m):
+            start -= 1
         if start < i:
             start_pt = result_points[start]
             win_dist_km = cum_dist - start_pt["cumulative_distance_km"]
