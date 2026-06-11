@@ -22,15 +22,21 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from video_meta_parser import (
-    extract_creation_time_from_metadata,
+    extract_creation_time,
     find_closest_track_point_by_time,
 )
 
 # CHINESE_FONT_PATH = "/System/Library/Fonts/Hiragino Sans GB.ttc"
 # CHINESE_FONT_PATH = "/System/Library/Fonts/STHeiti Light.ttc"
-CHINESE_FONT_PATH = "/System/Library/Fonts/STHeiti Medium.ttc"
+# CHINESE_FONT_PATH = "/System/Library/Fonts/STHeiti Medium.ttc"
 # CHINESE_FONT_PATH = "/System/Library/Fonts/PingFang Bold.ttc"
 # CHINESE_FONT_PATH = "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc"
+
+# Hiragino Sans GB 是 ttc 字体集合，index=2 是 W6 粗体，且完整支持简繁中文。
+CHINESE_FONT_PATH = "/System/Library/Fonts/Hiragino Sans GB.ttc"
+CHINESE_FONT_INDEX = 2
+# 加载中文字体失败时使用的兜底字体路径
+DEFAULT_CHINESE_FONT_PATH = "/System/Library/Fonts/STHeiti Medium.ttc"
 
 
 # 计算轨迹的边界，用于坐标映射
@@ -156,7 +162,7 @@ def add_video_watermark(input_video, output_video, track_data):
     watermark_y = elevation_watermark_y - watermark_height - 5  # 轨迹水印在时间水印上方
     
     # 从视频元数据中提取拍摄时间
-    video_time = extract_creation_time_from_metadata(input_video)
+    video_time = extract_creation_time(input_video)
     
     # 找到最接近的轨迹点
     print(f"视频时间: {video_time}")
@@ -310,7 +316,7 @@ def add_video_watermark(input_video, output_video, track_data):
             draw = ImageDraw.Draw(temp_img)
             
             # 加载中文字体
-            font = ImageFont.truetype(font_path, font_size)
+            font = ImageFont.truetype(font_path, font_size, index=CHINESE_FONT_INDEX)
             
             # 获取文本边界框（无边框时的尺寸）
             bbox = draw.textbbox((0, 0), text, font=font)
@@ -340,9 +346,10 @@ def add_video_watermark(input_video, output_video, track_data):
             draw = ImageDraw.Draw(pil_img)
             font_size = int(font_scale * 30)
             try:
-                pil_font = ImageFont.truetype(CHINESE_FONT_PATH, font_size)
+                pil_font = ImageFont.truetype(CHINESE_FONT_PATH, font_size, index=CHINESE_FONT_INDEX)
             except:
-                pil_font = ImageFont.truetype("/System/Library/Fonts/STHeiti Light.ttc", font_size)
+                print(f"加载中文字体失败，使用兜底字体: {DEFAULT_CHINESE_FONT_PATH}")
+                pil_font = ImageFont.truetype(DEFAULT_CHINESE_FONT_PATH, font_size)
             
             # 🔧 关键修正：将左下角坐标转换为左上角坐标
             x_bottom, y_bottom = org  # 左下角坐标（基线位置）
@@ -379,7 +386,7 @@ def add_video_watermark(input_video, output_video, track_data):
         
         # 添加拍摄时间和距离信息（右下角）
         if video_time:
-            # 从extract_creation_time_from_metadata函数获取的时间已经是UTC+8
+            # 从extract_creation_time函数获取的时间已经是UTC+8
             time_str = (video_time + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M")
             # 里程、爬升、海拔高度 - 显示在上面一行
             info2_str = f"里程{distance_km:.1f}km 爬升{elevation_gain:.0f}m 海拔{elevation:.0f}m"

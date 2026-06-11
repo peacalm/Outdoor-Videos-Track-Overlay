@@ -239,10 +239,6 @@ def extract_creation_time(video_file):
     return None
 
 
-# 保留与原 trail_marker.py 同名函数，便于向后兼容
-extract_creation_time_from_metadata = extract_creation_time
-
-
 # ---------------------------------------------------------------------------
 # 提取拍摄位置（GPS）
 # ---------------------------------------------------------------------------
