@@ -82,7 +82,7 @@ def main(input_dir='input', output_dir='output', workers=None):
           f"爬升: {summary['total_ascent_m']:.0f} m, "
           f"下降: {summary['total_descent_m']:.0f} m, "
           f"最高海拔: {summary['max_elevation_m']:.0f} m, "
-          f"用时: {duration_str}")
+          f"用时: {duration_str} \n")
     if not track_points or not track_times:
         print("轨迹点或时间点为空")
         return
