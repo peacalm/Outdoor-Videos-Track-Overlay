@@ -70,12 +70,19 @@ def main(input_dir='input', output_dir='output', workers=None):
     track_times = track_data["raw_times"]
     print(f"轨迹点数量: {len(track_points)}")
     print(f"轨迹时间点数量: {len(track_times)}")
+
     summary = track_data["summary"]
+    
+    total_sec = int(round(summary["total_duration_s"]))
+    h, rem = divmod(total_sec, 3600)
+    m, s = divmod(rem, 60)
+    duration_str = f"{h}h{m:02d}m{s:02d}s" if h > 0 else f"{m}m{s:02d}s"
+
     print(f"总距离: {summary['total_distance_km']:.2f} km, "
           f"爬升: {summary['total_ascent_m']:.0f} m, "
           f"下降: {summary['total_descent_m']:.0f} m, "
           f"最高海拔: {summary['max_elevation_m']:.0f} m, "
-          f"用时: {summary['total_duration_s']:.0f} s")
+          f"用时: {duration_str}")
     if not track_points or not track_times:
         print("轨迹点或时间点为空")
         return
