@@ -9,7 +9,7 @@ import multiprocessing
 import os
 
 from track_parser import parse_track_file
-from video_meta_parser import extract_creation_time_from_metadata
+from video_meta_parser import extract_creation_time
 from video_watermarker import process_video
 
 
@@ -91,7 +91,7 @@ def main(input_dir='input', output_dir='output', workers=None):
     for video_file in video_files:
         input_video = os.path.join(input_dir, video_file)
         # 获取视频创建时间并格式化为文件名前缀
-        video_time = extract_creation_time_from_metadata(input_video)
+        video_time = extract_creation_time(input_video)
         if video_time:
             time_prefix = video_time.strftime("%Y%m%d_%H%M%S")
             output_filename = f"{time_prefix}_{video_file}"
