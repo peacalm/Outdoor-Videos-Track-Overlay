@@ -90,7 +90,7 @@ def main(input_dir='input', output_dir='output', workers=None):
     # 找到所有MP4视频文件
     video_files = [f for f in os.listdir(input_dir) if f.endswith('.mp4')]
     if not video_files:
-        print("未找到MP4视频文件")
+        print(f"未找到MP4视频文件, input_dir: {input_dir}")
         return
     
     # 准备进程池参数
