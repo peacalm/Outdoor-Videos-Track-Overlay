@@ -26,6 +26,7 @@ import re
 import subprocess
 import xml.etree.ElementTree as ET
 from datetime import datetime
+from typing import Optional
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +212,7 @@ def _try_mutagen_time(video_file):
     return None
 
 
-def extract_creation_time(video_file):
+def extract_creation_time(video_file) -> Optional[datetime]:
     """按顺序尝试四种方法，返回视频创建时间（datetime）或 None"""
     print(f"尝试从视频元数据中提取创建时间: {video_file}")
 

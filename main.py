@@ -95,6 +95,7 @@ def main(input_dir='input', output_dir='output', workers=None):
     
     # 准备进程池参数
     pool_args = []
+    failed_videos = []
     for video_file in video_files:
         input_video = os.path.join(input_dir, video_file)
         # 获取视频创建时间并格式化为文件名前缀
@@ -103,10 +104,20 @@ def main(input_dir='input', output_dir='output', workers=None):
             time_prefix = video_time.strftime("%Y%m%d_%H%M%S")
             output_filename = f"{time_prefix}_{video_file}"
         else:
-            output_filename = video_file
+            failed_videos.append(video_file)
+            continue
         output_video = os.path.join(output_dir, output_filename)
         pool_args.append((input_video, output_video, track_data))
     
+    if failed_videos:
+        print(f"未成功提取 {len(failed_videos)} 个视频的创建时间:")
+        for video_file in failed_videos:
+            print(f"  {video_file}")
+    
+    if not pool_args:
+        print("所有视频创建时间提取失败，无法继续处理")
+        return
+
     # 使用多进程处理视频
     print(f"开始并发处理 {len(video_files)} 个视频（并发度: {workers}）")
     with multiprocessing.Pool(processes=workers) as pool:
