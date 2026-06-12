@@ -59,7 +59,7 @@ def main(input_dir='input', output_dir='output', workers=None):
     # 查找轨迹文件（支持 .kml / .gpx），多个时由用户选择
     track_file = select_track_file(input_dir)
     if not track_file:
-        print("未找到轨迹文件（支持 .kml / .gpx）")
+        print(f"未找到轨迹文件（支持 .kml / .gpx）, input_dir: {input_dir}")
         return
     
     print(f"使用轨迹文件: {track_file}")
