@@ -25,7 +25,7 @@ import os
 import re
 import subprocess
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 
@@ -69,6 +69,17 @@ def _parse_datetime(time_str):
 # ---------------------------------------------------------------------------
 # 提取创建时间
 # ---------------------------------------------------------------------------
+
+def _try_filename_time(video_file, filename_pattern):
+    """从文件名中提取时间，pattern格式不包含扩展名，例如'VID_%Y%m%d_%H%M%S'。
+    返回 datetime 对象"""
+    try:
+        video_file_basename = os.path.basename(video_file)
+        video_file_basename_noext = os.path.splitext(video_file_basename)[0]
+        return datetime.strptime(video_file_basename_noext, filename_pattern)
+    except ValueError as e:
+        print(f"无法从文件名提取时间，错误信息: {e}")
+        return None
 
 def _try_ffprobe_time(video_file):
     """方法 1：使用 ffprobe 读取元数据"""
@@ -212,9 +223,18 @@ def _try_mutagen_time(video_file):
     return None
 
 
-def extract_creation_time(video_file) -> Optional[datetime]:
-    """按顺序尝试四种方法，返回视频创建时间（datetime）或 None"""
-    print(f"尝试从视频元数据中提取创建时间: {video_file}")
+def extract_creation_time(video_file, filename_pattern=None) -> Optional[datetime]:
+    """如果提供文件名模式，先尝试从文件名中提取时间。否则按顺序尝试四种方法。
+    返回视频创建UTC时间（datetime）或 None"""
+
+    print(f"尝试提取创建时间: {video_file}")
+
+    if filename_pattern:
+        creation_time = _try_filename_time(video_file, filename_pattern)
+        if creation_time:
+            utc_creation_time = creation_time - timedelta(hours=8)
+            print(f"✓ 从文件名提取到时间: {creation_time}, UTC时间: {utc_creation_time}")
+            return utc_creation_time
 
     creation_time = _try_ffprobe_time(video_file)
     if creation_time:
@@ -359,7 +379,8 @@ if __name__ == "__main__":
         print("用法: python video_meta_parser.py <video_file>")
         sys.exit(1)
     path = sys.argv[1]
-    t = extract_creation_time(path)
+    filename_pattern = sys.argv[2] if len(sys.argv) > 2 else None
+    t = extract_creation_time(path, filename_pattern)
     loc = extract_creation_location(path)
     print(f"创建时间: {t}")
     print(f"位置:     {loc}")

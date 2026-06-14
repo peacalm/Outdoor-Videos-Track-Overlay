@@ -49,7 +49,7 @@ def select_track_file(input_dir, preferred_exts=('.kml', '.gpx')):
         print("输入无效，请重新输入。")
 
 
-def main(input_dir='input', output_dir='output', workers=None):
+def main(input_dir='input', output_dir='output', workers=None, filename_pattern=None):
     # 并发度默认使用 CPU 核心数
     if workers is None:
         workers = multiprocessing.cpu_count()
@@ -99,7 +99,7 @@ def main(input_dir='input', output_dir='output', workers=None):
     for video_file in video_files:
         input_video = os.path.join(input_dir, video_file)
         # 获取视频创建时间并格式化为文件名前缀
-        video_time = extract_creation_time(input_video)
+        video_time = extract_creation_time(input_video, filename_pattern)
         if video_time:
             time_prefix = video_time.strftime("%Y%m%d_%H%M%S")
             output_filename = f"{time_prefix}_{video_file}"
@@ -107,7 +107,7 @@ def main(input_dir='input', output_dir='output', workers=None):
             failed_videos.append(video_file)
             continue
         output_video = os.path.join(output_dir, output_filename)
-        pool_args.append((input_video, output_video, track_data))
+        pool_args.append((input_video, video_time, output_video, track_data))
     
     if failed_videos:
         print(f"未成功提取 {len(failed_videos)} 个视频的创建时间:")
@@ -145,5 +145,10 @@ if __name__ == "__main__":
         "-w", "--workers", type=int, default=multiprocessing.cpu_count(),
         help="并发处理视频的并发度，默认: CPU 核心数 (%d)" % multiprocessing.cpu_count(),
     )
+    parser.add_argument(
+        "-p", "--filename-pattern", default=None,
+        help="文件名模式，不含扩展名，用于从文件名中提取时间，默认: None。"
+             "例如'VID_%%Y%%m%%d_%%H%%M%%S'",
+    )
     args = parser.parse_args()
-    main(args.input_dir, args.output_dir, args.workers)
+    main(args.input_dir, args.output_dir, args.workers, args.filename_pattern)

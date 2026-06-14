@@ -71,7 +71,7 @@ def map_coordinate(lon, lat, min_lon, max_lon, min_lat, max_lat, width, height, 
 
 
 # 为视频添加轨迹水印
-def add_video_watermark(input_video, output_video, track_data):
+def add_video_watermark(input_video, video_time, output_video, track_data):
     # 从解析结果中取出所需数据（本模块不做任何轨迹计算）
     points = track_data["points"]          # 每个点的详细数据（含累计距离/爬升等）
     track_points = track_data["raw_points"]  # [(lon, lat, elevation), ...]
@@ -93,6 +93,10 @@ def add_video_watermark(input_video, output_video, track_data):
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = cv2.VideoWriter(output_video, fourcc, fps, (width, height))
     
+    if not video_time:
+        print("视频创建时间为空")
+        return False
+
     # 计算轨迹边界
     if not track_points:
         print("轨迹点为空")
@@ -160,9 +164,6 @@ def add_video_watermark(input_video, output_video, track_data):
 
     watermark_x = width - watermark_width - right_border_width  # 右边界，与时间水印对齐
     watermark_y = elevation_watermark_y - watermark_height - 5  # 轨迹水印在时间水印上方
-    
-    # 从视频元数据中提取拍摄时间
-    video_time = extract_creation_time(input_video)
     
     # 找到最接近的轨迹点
     # print(f"视频时间: {video_time}")
@@ -524,12 +525,12 @@ def add_video_watermark(input_video, output_video, track_data):
 
 def process_video(args):
     """处理单个视频的函数，用于多进程调用"""
-    input_video, output_video, track_data = args
+    input_video, video_time, output_video, track_data = args
     video_file = os.path.basename(input_video)
     print(f"\n处理视频: {video_file}")
     
     try:
-        add_video_watermark(input_video, output_video, track_data)
+        add_video_watermark(input_video, video_time, output_video, track_data)
         return f"成功处理: {video_file}"
     except Exception as e:
         print(f"处理视频 {video_file} 时出错: {e}")
