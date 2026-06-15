@@ -35,6 +35,7 @@ CHINESE_FONT_INDEX = 2
 DEFAULT_CHINESE_FONT_PATH = "/System/Library/Fonts/STHeiti Medium.ttc"
 
 
+# 找到与给定视频时间最接近的轨迹点索引
 def find_closest_track_point_index(video_time, track_points, track_times):
     """找到与 video_time 最接近的轨迹点索引"""
     if not track_times or not track_points:

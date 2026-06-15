@@ -14,10 +14,6 @@
   - extract_creation_location(video_file) -> (lon, lat) | None
       使用 ffprobe 从视频元数据中提取 GPS 位置信息。
 
-  - find_closest_track_point_index(video_time, track_points, track_times) -> int
-      找到与给定视频时间最接近的轨迹点索引。
-
-所有 print 日志均保留，方便排查问题。
 """
 
 import json
