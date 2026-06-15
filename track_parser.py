@@ -41,7 +41,7 @@
 import math
 import os
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 
 try:
     from scipy.signal import medfilt
@@ -182,7 +182,7 @@ def _parse_kml(kml_file):
                 elevations.append(elevation)
                 track_points.append((lon, lat, elevation))
             # 简单 coordinates 没有时间点，按等间隔 1 秒 模拟
-            track_times = [datetime.utcfromtimestamp(i)
+            track_times = [datetime.fromtimestamp(i, tz=timezone.utc)
                            for i in range(len(track_points))]
 
     if not track_points:
@@ -282,7 +282,7 @@ def _parse_gpx(gpx_file):
 
     # 如果 GPX 没有时间戳，则用递增时间代替（避免后续计算出错）
     if all(t is None for t in track_times):
-        track_times = [datetime.utcfromtimestamp(i)
+        track_times = [datetime.fromtimestamp(i, tz=timezone.utc)
                        for i in range(len(track_points))]
 
     # 海拔中值滤波
@@ -467,10 +467,119 @@ def parse_track_file(track_file, smooth_window=5):
     return _build_result(points, times, smooth_window=smooth_window)
 
 
+def visualize_track(result, output_file=None):
+    """将轨迹解析结果可视化，包含轨迹形状、海拔、速度、坡度曲线图。
+
+    result: parse_track_file 返回的解析结果字典
+    output_file: 输出图片路径，为 None 时直接弹窗显示
+    """
+    import matplotlib
+    if output_file:
+        matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    summary = result["summary"]
+    points = result["points"]
+
+    lons = [p["lon"] for p in points]
+    lats = [p["lat"] for p in points]
+    elevations = [p["elevation"] for p in points]
+    speeds = [p["speed_km_per_h"] for p in points]
+    grades = [p["grade_degree"] for p in points]
+    distances = [p["cumulative_distance_km"] for p in points]
+
+    import matplotlib.gridspec as gridspec
+
+    fig = plt.figure()
+    fig.suptitle("Track Analysis", fontsize=16, fontweight="bold")
+
+    # 使用 GridSpec: 3行2列，summary 占第一行
+    gs = gridspec.GridSpec(3, 2, height_ratios=[0.3, 1, 1], hspace=0.3, wspace=0.25)
+
+    # --- 顶部：Summary 信息 ---
+    ax_summary = fig.add_subplot(gs[0, :])
+    ax_summary.axis('off')
+    summary_text = (
+        f"Distance: {summary['total_distance_km']:.2f} km  |  "
+        f"Ascent: {summary['total_ascent_m']:.0f} m  |  "
+        f"Descent: {summary['total_descent_m']:.0f} m  |  "
+        f"Elevation: {summary['min_elevation_m']:.0f} ~ {summary['max_elevation_m']:.0f} m\n"
+        f"Duration: {int(summary['total_duration_s'] // 3600):02d}:{int((summary['total_duration_s'] % 3600) // 60):02d}:{int(summary['total_duration_s'] % 60):02d}  |  "
+        f"Avg Speed: {summary['avg_speed_km_per_h']:.1f} km/h  |  "
+        f"Avg Pace: {summary['avg_pace_min_per_km']:.1f} min/km"
+    )
+    ax_summary.text(
+        0.5, 0.5, summary_text, transform=ax_summary.transAxes,
+        fontsize=11, verticalalignment='center', horizontalalignment='center',
+        bbox=dict(boxstyle='round,pad=0.5', facecolor='wheat', alpha=0.8),
+    )
+
+    # --- 左上：轨迹形状 ---
+    ax_track = fig.add_subplot(gs[1, 0])
+    ax_track.plot(lons, lats, linewidth=1.5, color="#2196F3")
+    ax_track.plot(lons[0], lats[0], 'go')
+    ax_track.plot(lons[-1], lats[-1], 'rs')
+    # ax_track.plot(lons[0], lats[0], 'go', markersize=8, label="Start")
+    # ax_track.plot(lons[-1], lats[-1], 'rs', markersize=8, label="End")
+    ax_track.set_xlabel("Longitude")
+    ax_track.set_ylabel("Latitude")
+    ax_track.set_title("Track Shape")
+    ax_track.legend(loc="upper right")
+    ax_track.set_aspect("equal")
+    ax_track.grid(True, alpha=0.3)
+
+    # --- 右上：海拔曲线 ---
+    ax_ele = fig.add_subplot(gs[1, 1])
+    ax_ele.fill_between(distances, elevations, alpha=0.3, color="#4CAF50")
+    ax_ele.plot(distances, elevations, linewidth=1.2, color="#4CAF50")
+    ax_ele.set_xlabel("Distance (km)")
+    ax_ele.set_ylabel("Elevation (m)")
+    ax_ele.set_title("Elevation Profile")
+    if elevations:
+        ax_ele.set_ylim(bottom=min(elevations))
+    ax_ele.grid(True, alpha=0.3)
+
+    # --- 左下：速度曲线 ---
+    ax_speed = fig.add_subplot(gs[2, 0])
+    ax_speed.fill_between(distances, speeds, alpha=0.3, color="#FF9800")
+    ax_speed.plot(distances, speeds, linewidth=1.2, color="#FF9800")
+    ax_speed.set_xlabel("Distance (km)")
+    ax_speed.set_ylabel("Speed (km/h)")
+    ax_speed.set_title("Speed")
+    ax_speed.grid(True, alpha=0.3)
+
+    # --- 右下：坡度曲线 ---
+    ax_grade = fig.add_subplot(gs[2, 1])
+    ax_grade.fill_between(distances, grades, alpha=0.3, color="#F44336")
+    ax_grade.plot(distances, grades, linewidth=1.2, color="#F44336")
+    ax_grade.axhline(y=0, color='gray', linewidth=0.5, linestyle='--')
+    ax_grade.set_xlabel("Distance (km)")
+    ax_grade.set_ylabel("Grade (°)")
+    ax_grade.set_title("Grade (Degree)")
+    ax_grade.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+
+    if output_file:
+        fig.savefig(output_file, dpi=150, bbox_inches='tight')
+        print(f"图表已保存到: {output_file}")
+    else:
+        manager = plt.get_current_fig_manager()
+        try:
+            manager.resize(*manager.window.maxsize())
+        except AttributeError:
+            try:
+                manager.window.showMaximized()
+            except AttributeError:
+                pass
+        plt.show()
+    plt.close(fig)
+
+
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:
-        print("用法: python track_parser.py <轨迹文件>")
+        print("用法: python track_parser.py <轨迹文件> [输出图片路径]")
         sys.exit(1)
     result = parse_track_file(sys.argv[1])
     print("=== Summary ===")
@@ -480,3 +589,5 @@ if __name__ == "__main__":
     if result["points"]:
         p = result["points"][0]
         print(f"First point keys: {list(p.keys())}")
+    output_file = sys.argv[2] if len(sys.argv) > 2 else None
+    visualize_track(result, output_file)
