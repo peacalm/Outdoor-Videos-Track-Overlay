@@ -367,13 +367,14 @@ def extract_creation_location(video_file):
 
 
 if __name__ == "__main__":
-    import sys
-    if len(sys.argv) < 2:
-        print("用法: python video_info_parser.py <video_file> [filename_pattern]")
-        sys.exit(1)
-    path = sys.argv[1]
-    filename_pattern = sys.argv[2] if len(sys.argv) > 2 else None
-    t = extract_creation_time(path, filename_pattern)
-    loc = extract_creation_location(path)
+    import argparse
+    parser = argparse.ArgumentParser(description="视频信息解析工具")
+    parser.add_argument("video_file", help="视频文件路径")
+    parser.add_argument("-p", "--filename-pattern", default=None,
+                        help="文件名时间模式（不含扩展名），例如'VID_%%Y%%m%%d_%%H%%M%%S'")
+    args = parser.parse_args()
+
+    t = extract_creation_time(args.video_file, args.filename_pattern)
+    loc = extract_creation_location(args.video_file)
     print(f"创建时间: {t}")
     print(f"位置:     {loc}")

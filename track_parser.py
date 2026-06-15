@@ -577,11 +577,16 @@ def visualize_track(result, output_file=None):
 
 
 if __name__ == "__main__":
-    import sys
-    if len(sys.argv) < 2:
-        print("用法: python track_parser.py <轨迹文件> [输出图片路径]")
-        sys.exit(1)
-    result = parse_track_file(sys.argv[1])
+    import argparse
+    parser = argparse.ArgumentParser(description="轨迹文件解析与可视化工具")
+    parser.add_argument("track_file", help="轨迹文件路径（支持 .kml / .gpx）")
+    parser.add_argument("-o", "--output", default=None,
+                        help="输出图片路径，不指定则弹窗显示")
+    parser.add_argument("-w", "--smooth-window", type=int, default=5,
+                        help="计算坡度/配速/速度时使用的滑动窗口点数（默认: 5）")
+    args = parser.parse_args()
+
+    result = parse_track_file(args.track_file, smooth_window=args.smooth_window)
     print("=== Summary ===")
     for k, v in result["summary"].items():
         print(f"  {k}: {v}")
@@ -589,5 +594,4 @@ if __name__ == "__main__":
     if result["points"]:
         p = result["points"][0]
         print(f"First point keys: {list(p.keys())}")
-    output_file = sys.argv[2] if len(sys.argv) > 2 else None
-    visualize_track(result, output_file)
+    visualize_track(result, args.output)
