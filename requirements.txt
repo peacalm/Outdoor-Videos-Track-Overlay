@@ -6,7 +6,7 @@ Pillow
 # 轨迹海拔中值滤波（track_parser.py，可选，缺失时自动跳过滤波）
 scipy
 
-# 视频创建时间/位置提取的备选方案（video_meta_parser.py，可选）
+# 视频创建时间/位置提取的备选方案（video_info_parser.py，可选）
 # 优先使用系统 ffprobe；以下为降级备选
 moviepy
 mutagen

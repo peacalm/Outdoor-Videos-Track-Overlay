@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-视频元数据解析模块
+视频信息解析模块
 
 对外接口:
-  - extract_creation_time(video_file) -> datetime | None
-      按顺序尝试四种方法提取视频拍摄/创建时间:
-      1. ffprobe
-      2. 文件系统时间戳（转换为 UTC，假定原时间为北京时间 UTC+8）
-      3. moviepy
-      4. mutagen
+  - extract_creation_time(video_file, filename_pattern=None) -> datetime | None
+      提取视频拍摄/创建时间（UTC），按以下优先级依次尝试：
+      1. 从文件名中提取（需提供 filename_pattern，将文件名视为北京时间并转 UTC）
+      2. ffprobe 读取视频元数据
+      3. 文件系统时间戳（将文件名视为北京时间并转 UTC）
+      4. moviepy 读取视频元数据
+      5. mutagen 读取 MP4 元数据
 
   - extract_creation_location(video_file) -> (lon, lat) | None
       使用 ffprobe 从视频元数据中提取 GPS 位置信息。
@@ -16,8 +17,7 @@
   - find_closest_track_point_index(video_time, track_points, track_times) -> int
       找到与给定视频时间最接近的轨迹点索引。
 
-所有 print 日志均保留，方便排查问题；返回值与原 trail_marker.py
-中的同名函数完全一致，便于平滑替换。
+所有 print 日志均保留，方便排查问题。
 """
 
 import json
@@ -71,18 +71,35 @@ def _parse_datetime(time_str):
 # ---------------------------------------------------------------------------
 
 def _try_filename_time(video_file, filename_pattern):
-    """从文件名中提取时间，pattern格式不包含扩展名，例如'VID_%Y%m%d_%H%M%S'。
-    返回 datetime 对象"""
+    """从文件名中按正则匹配提取时间，pattern 格式不包含扩展名，例如 'VID_%Y%m%d_%H%M%S'。
+    会在文件名（不含扩展名）中搜索匹配部分，提取后视为北京时间，由调用方转换为 UTC。
+    返回 naive datetime 对象或 None。"""
+    # 将 strptime 格式的模式转换为正则表达式
+    directive_to_regex = {
+        '%Y': r'\d{4}', '%m': r'\d{2}', '%d': r'\d{2}',
+        '%H': r'\d{2}', '%M': r'\d{2}', '%S': r'\d{2}',
+        '%f': r'\d+', '%y': r'\d{2}', '%j': r'\d{3}',
+        '%I': r'\d{2}', '%p': r'[APap][Mm]', '%Z': r'[A-Za-z]+',
+    }
+    regex_pattern = re.escape(filename_pattern)
+    for directive, regex_repl in directive_to_regex.items():
+        regex_pattern = regex_pattern.replace(re.escape(directive), regex_repl)
+
+    video_file_basename_noext = os.path.splitext(os.path.basename(video_file))[0]
+    match = re.search(regex_pattern, video_file_basename_noext)
+    if not match:
+        print(f"文件名中未匹配到时间模式: {video_file_basename_noext}")
+        return None
+
+    matched_str = match.group(0)
     try:
-        video_file_basename = os.path.basename(video_file)
-        video_file_basename_noext = os.path.splitext(video_file_basename)[0]
-        return datetime.strptime(video_file_basename_noext, filename_pattern)
+        return datetime.strptime(matched_str, filename_pattern)
     except ValueError as e:
-        print(f"无法从文件名提取时间，错误信息: {e}")
+        print(f"无法从文件名解析时间: {matched_str}, 错误信息: {e}")
         return None
 
 def _try_ffprobe_time(video_file):
-    """方法 1：使用 ffprobe 读取元数据"""
+    """使用 ffprobe 读取视频元数据中的时间字段"""
     try:
         cmd_variations = [
             ['ffprobe', '-v', 'quiet', '-print_format', 'json',
@@ -144,7 +161,7 @@ def _try_ffprobe_time(video_file):
 
 
 def _try_filesystem_time(video_file):
-    """方法 2：使用文件系统时间戳（假定为北京时间，转 UTC）"""
+    """使用文件系统时间戳（假定为北京时间，转 UTC）"""
     try:
         stat_info = os.stat(video_file)
 
@@ -176,7 +193,7 @@ def _try_filesystem_time(video_file):
 
 
 def _try_moviepy_time(video_file):
-    """方法 3：使用 moviepy 读取元数据（可选依赖）"""
+    """使用 moviepy 读取视频元数据（可选依赖）"""
     try:
         from moviepy.editor import VideoFileClip
         clip = VideoFileClip(video_file)
@@ -199,7 +216,7 @@ def _try_moviepy_time(video_file):
 
 
 def _try_mutagen_time(video_file):
-    """方法 4：使用 mutagen 读取 MP4 元数据（可选依赖）"""
+    """使用 mutagen 读取 MP4 元数据（可选依赖）"""
     try:
         from mutagen.mp4 import MP4
         video = MP4(video_file)
@@ -224,11 +241,19 @@ def _try_mutagen_time(video_file):
 
 
 def extract_creation_time(video_file, filename_pattern=None) -> Optional[datetime]:
-    """如果提供文件名模式，先尝试从文件名中提取时间。否则按顺序尝试四种方法。
-    返回视频创建UTC时间（datetime）或 None"""
+    """提取视频创建时间，返回 UTC 时间（datetime）或 None。
+
+    提取策略按优先级依次为：
+      1. 从文件名提取（需提供 filename_pattern，视为北京时间转 UTC）
+      2. ffprobe 读取视频元数据
+      3. 文件系统时间戳（视为北京时间转 UTC）
+      4. moviepy 读取视频元数据
+      5. mutagen 读取 MP4 元数据
+    """
 
     print(f"尝试提取创建时间: {video_file}")
 
+    # 方法 1：从文件名提取
     if filename_pattern:
         creation_time = _try_filename_time(video_file, filename_pattern)
         if creation_time:
@@ -236,21 +261,25 @@ def extract_creation_time(video_file, filename_pattern=None) -> Optional[datetim
             print(f"✓ 从文件名提取到时间: {creation_time}, UTC时间: {utc_creation_time}")
             return utc_creation_time
 
+    # 方法 2：ffprobe
     creation_time = _try_ffprobe_time(video_file)
     if creation_time:
         print(f"✓ 使用ffprobe获取到创建时间: {creation_time}")
         return creation_time
 
+    # 方法 3：文件系统时间戳
     creation_time = _try_filesystem_time(video_file)
     if creation_time:
         print(f"✓ 使用文件系统时间: {creation_time}")
         return creation_time
 
+    # 方法 4：moviepy
     creation_time = _try_moviepy_time(video_file)
     if creation_time:
         print(f"✓ 使用moviepy获取到创建时间: {creation_time}")
         return creation_time
 
+    # 方法 5：mutagen
     creation_time = _try_mutagen_time(video_file)
     if creation_time:
         print(f"✓ 使用mutagen获取到创建时间: {creation_time}")
@@ -341,42 +370,10 @@ def extract_creation_location(video_file):
         return None
 
 
-# 保留与原 trail_marker.py 同名函数，便于向后兼容
-extract_creation_location_from_metadata = extract_creation_location
-
-
-# ---------------------------------------------------------------------------
-# 最接近轨迹点匹配
-# ---------------------------------------------------------------------------
-
-def find_closest_track_point_index(video_time, track_points, track_times):
-    """找到与 video_time 最接近的轨迹点索引"""
-    if not track_times or not track_points:
-        raise ValueError("无法获取轨迹时间信息")
-
-    min_diff = float('inf')
-    closest_idx = 0
-
-    for i, track_time in enumerate(track_times):
-        diff = abs((video_time - track_time).total_seconds())
-        if diff < min_diff:
-            min_diff = diff
-            closest_idx = i
-
-    return closest_idx
-
-
-# 保留与原 trail_marker.py 同名函数，便于向后兼容
-def find_closest_track_point_by_time(video_time, track_points, track_times):
-    return find_closest_track_point_index(
-        video_time, track_points, track_times,
-    )
-
-
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:
-        print("用法: python video_meta_parser.py <video_file>")
+        print("用法: python video_info_parser.py <video_file> [filename_pattern]")
         sys.exit(1)
     path = sys.argv[1]
     filename_pattern = sys.argv[2] if len(sys.argv) > 2 else None

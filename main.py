@@ -9,7 +9,7 @@ import multiprocessing
 import os
 
 from track_parser import parse_track_file
-from video_meta_parser import extract_creation_time
+from video_info_parser import extract_creation_time
 from video_watermarker import process_video
 
 

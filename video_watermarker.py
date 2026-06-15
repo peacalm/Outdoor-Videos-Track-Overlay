@@ -21,10 +21,6 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from video_meta_parser import (
-    extract_creation_time,
-    find_closest_track_point_by_time,
-)
 
 # CHINESE_FONT_PATH = "/System/Library/Fonts/Hiragino Sans GB.ttc"
 # CHINESE_FONT_PATH = "/System/Library/Fonts/STHeiti Light.ttc"
@@ -37,6 +33,23 @@ CHINESE_FONT_PATH = "/System/Library/Fonts/Hiragino Sans GB.ttc"
 CHINESE_FONT_INDEX = 2
 # 加载中文字体失败时使用的兜底字体路径
 DEFAULT_CHINESE_FONT_PATH = "/System/Library/Fonts/STHeiti Medium.ttc"
+
+
+def find_closest_track_point_index(video_time, track_points, track_times):
+    """找到与 video_time 最接近的轨迹点索引"""
+    if not track_times or not track_points:
+        raise ValueError("无法获取轨迹时间信息")
+
+    min_diff = float('inf')
+    closest_idx = 0
+
+    for i, track_time in enumerate(track_times):
+        diff = abs((video_time - track_time).total_seconds())
+        if diff < min_diff:
+            min_diff = diff
+            closest_idx = i
+
+    return closest_idx
 
 
 # 计算轨迹的边界，用于坐标映射
@@ -171,7 +184,7 @@ def add_video_watermark(input_video, video_time, output_video, track_data):
     
     # 从视频元数据中提取拍摄位置
 
-    video_position_idx_by_time = find_closest_track_point_by_time(video_time, track_points, track_times)
+    video_position_idx_by_time = find_closest_track_point_index(video_time, track_points, track_times)
     # print(f"时间匹配索引: {video_position_idx_by_time}")
     video_position_idx = video_position_idx_by_time
     
@@ -387,7 +400,7 @@ def add_video_watermark(input_video, video_time, output_video, track_data):
         
         # 添加拍摄时间和距离信息（右下角）
         if video_time:
-            # 从extract_creation_time函数获取的时间已经是UTC+8
+            # 从extract_creation_time函数获取的时间是UTC
             time_str = (video_time + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M")
             # 里程、爬升、海拔高度 - 显示在上面一行
             info2_str = f"里程{distance_km:.1f}km 爬升{elevation_gain:.0f}m 海拔{elevation:.0f}m"
