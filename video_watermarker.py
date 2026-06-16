@@ -158,6 +158,7 @@ def add_video_watermark(input_video, video_time, output_video, track_data):
     watermark_height = 450
 
     # 计算轨迹的长宽比（使用屏幕坐标）
+    # padding参数需与下面一致
     x0, y0 = map_coordinate(min_lon, min_lat, min_lon, max_lon, min_lat, max_lat, watermark_width, watermark_height)
     x1, y1 = map_coordinate(max_lon, max_lat, min_lon, max_lon, min_lat, max_lat, watermark_width, watermark_height)
     screen_width = abs(x1 - x0)
