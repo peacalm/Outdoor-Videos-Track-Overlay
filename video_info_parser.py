@@ -7,7 +7,7 @@
       提取视频拍摄/创建时间（UTC），按以下优先级依次尝试：
       1. 从文件名中提取（需提供 filename_pattern，将文件名视为北京时间并转 UTC）
       2. ffprobe 读取视频元数据
-      3. 文件系统时间戳（将文件名视为北京时间并转 UTC）
+      3. 文件系统时间戳（将文件系统时间视为北京时间并转 UTC）
       4. moviepy 读取视频元数据
       5. mutagen 读取 MP4 元数据
 
@@ -66,10 +66,10 @@ def _parse_datetime(time_str):
 # 提取创建时间
 # ---------------------------------------------------------------------------
 
-def _try_filename_time(video_file, filename_pattern):
+def _try_filename_time(video_file, filename_pattern, utc_offset_hours=-8):
     """从文件名中按正则匹配提取时间，pattern 格式不包含扩展名，例如 'VID_%Y%m%d_%H%M%S'。
-    会在文件名（不含扩展名）中搜索匹配部分，提取后视为北京时间，由调用方转换为 UTC。
-    返回 naive datetime 对象或 None。"""
+    会在文件名（不含扩展名）中搜索匹配部分，提取后视为北京时间并转换为 UTC。
+    返回 UTC 时间的 datetime 对象或 None。"""
     # 将 strptime 格式的模式转换为正则表达式
     directive_to_regex = {
         '%Y': r'\d{4}', '%m': r'\d{2}', '%d': r'\d{2}',
@@ -89,7 +89,11 @@ def _try_filename_time(video_file, filename_pattern):
 
     matched_str = match.group(0)
     try:
-        return datetime.strptime(matched_str, filename_pattern)
+        extracted_time = datetime.strptime(matched_str, filename_pattern)
+        print(f"从文件名提取时间: {extracted_time}")
+        utc_time = extracted_time + timedelta(hours=utc_offset_hours)
+        print(f"转换为UTC时间: {utc_time}")
+        return utc_time
     except ValueError as e:
         print(f"无法从文件名解析时间: {matched_str}, 错误信息: {e}")
         return None
@@ -125,6 +129,7 @@ def _try_ffprobe_time(video_file):
                             if field in tags:
                                 dt = _parse_datetime(tags[field])
                                 if dt is not None:
+                                    # print(f"从视频元数据.format.tags.{field}提取时间: {dt}")
                                     return dt
 
                     # streams.tags
@@ -136,6 +141,7 @@ def _try_ffprobe_time(video_file):
                                     if field in tags:
                                         dt = _parse_datetime(tags[field])
                                         if dt is not None:
+                                            # print(f"从视频元数据.streams.tags.{field}提取时间: {dt}")
                                             return dt
                 except json.JSONDecodeError:
                     # XML 回退
@@ -156,7 +162,7 @@ def _try_ffprobe_time(video_file):
     return None
 
 
-def _try_filesystem_time(video_file):
+def _try_filesystem_time(video_file, utc_offset_hours=-8):
     """使用文件系统时间戳（假定为北京时间，转 UTC）"""
     try:
         stat_info = os.stat(video_file)
@@ -169,16 +175,11 @@ def _try_filesystem_time(video_file):
             try:
                 if hasattr(stat_info, field_name):
                     timestamp = getattr(stat_info, field_name)
-                    dt = datetime.fromtimestamp(timestamp)
-                    print(f"使用文件系统{field_desc}: {dt}")
-                    # 北京时间 -> UTC
-                    new_hour = dt.hour - 8
-                    if new_hour < 0:
-                        dt_utc = dt.replace(day=dt.day - 1, hour=new_hour + 24)
-                    else:
-                        dt_utc = dt.replace(hour=new_hour)
-                    print(f"转换为UTC时间: {dt_utc}")
-                    return dt_utc
+                    extracted_time = datetime.fromtimestamp(timestamp)
+                    print(f"使用文件系统{field_desc}: {extracted_time}")
+                    utc_time = extracted_time + timedelta(hours=utc_offset_hours)
+                    print(f"转换为UTC时间: {utc_time}")
+                    return utc_time
             except Exception as e:
                 print(f"获取{field_desc}失败: {e}")
 
@@ -253,9 +254,8 @@ def extract_creation_time(video_file, filename_pattern=None) -> Optional[datetim
     if filename_pattern:
         creation_time = _try_filename_time(video_file, filename_pattern)
         if creation_time:
-            utc_creation_time = creation_time - timedelta(hours=8)
-            print(f"✓ 从文件名提取到时间: {creation_time}, UTC时间: {utc_creation_time}")
-            return utc_creation_time
+            print(f"✓ 从文件名提取到时间: {creation_time}")
+            return creation_time
 
     # 方法 2：ffprobe
     creation_time = _try_ffprobe_time(video_file)
@@ -372,9 +372,43 @@ if __name__ == "__main__":
     parser.add_argument("video_file", help="视频文件路径")
     parser.add_argument("-p", "--filename-pattern", default=None,
                         help="文件名时间模式（不含扩展名），例如'VID_%%Y%%m%%d_%%H%%M%%S'")
+    parser.add_argument("-t", "--test", action="store_true",
+                        help="测试模式：分别用每种方法解析创建时间")
     args = parser.parse_args()
 
-    t = extract_creation_time(args.video_file, args.filename_pattern)
-    loc = extract_creation_location(args.video_file)
-    print(f"创建时间: {t}")
-    print(f"位置:     {loc}")
+    if args.test:
+        print(f"=== 测试模式: {args.video_file} ===\n")
+        
+        print("1. 从文件名提取:")
+        if args.filename_pattern:
+            result = _try_filename_time(args.video_file, args.filename_pattern)
+            print(f"   结果: {result}\n")
+        else:
+            print("   跳过（未提供 filename-pattern）\n")
+        
+        print("2. ffprobe:")
+        result = _try_ffprobe_time(args.video_file)
+        print(f"   结果: {result}\n")
+        
+        print("3. 文件系统时间:")
+        result = _try_filesystem_time(args.video_file)
+        print(f"   结果: {result}\n")
+        
+        print("4. moviepy:")
+        result = _try_moviepy_time(args.video_file)
+        print(f"   结果: {result}\n")
+        
+        print("5. mutagen:")
+        result = _try_mutagen_time(args.video_file)
+        print(f"   结果: {result}\n")
+        
+        print("=== 最终结果 ===")
+        t = extract_creation_time(args.video_file, args.filename_pattern)
+        loc = extract_creation_location(args.video_file)
+        print(f"创建时间: {t}")
+        print(f"位置:     {loc}")
+    else:
+        t = extract_creation_time(args.video_file, args.filename_pattern)
+        loc = extract_creation_location(args.video_file)
+        print(f"创建时间: {t}")
+        print(f"位置:     {loc}")
