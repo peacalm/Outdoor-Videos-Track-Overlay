@@ -64,81 +64,107 @@ def calculate_bounds(points):
     return min_lon, max_lon, min_lat, max_lat
 
 
-# 将地理坐标映射到屏幕坐标
-def map_coordinate(lon, lat, min_lon, max_lon, min_lat, max_lat, width, height, padding=20, y_scale=1.1):
+def map_coordinate(lon, lat, min_lon, max_lon, min_lat, max_lat, width, height,
+                   padding=10, y_scale=1.1, h_align='right', v_align='bottom'):
+    """
+    将地理坐标映射到屏幕坐标。
+    :param lon: 经度
+    :param lat: 纬度
+    :param min_lon: 轨迹最小经度
+    :param max_lon: 轨迹最大经度
+    :param min_lat: 轨迹最小纬度
+    :param max_lat: 轨迹最大纬度
+    :param width: 视频中用于展示轨迹的区域的宽度
+    :param height: 视频中用于展示轨迹的区域的高度
+    :param padding: 水印与视频中用于展示轨迹的区域边界的间距，单位像素
+    :param y_scale: 纬度缩放比例
+    :param y_scale: 纬度缩放比例，用于调整纬度在屏幕上的显示比例
+    :param h_align: 水平对齐方式，可选 'left'（靠左）、'center'（居中）、'right'（靠右）
+    :param v_align: 竖直对齐方式，可选 'top'（靠上）、'center'（居中）、'bottom'（靠下）
+    :return: (x, y) 屏幕坐标
+    """
     # 计算经纬度范围
     lon_range = max_lon - min_lon
     lat_range = max_lat - min_lat
+    lat_range *= y_scale
 
     # 计算缩放比例，取较小值以确保整个轨迹都能显示
     scale = min((width - 2*padding)/lon_range, (height - 2*padding)/lat_range)
 
-    # 计算偏移量
-    offset_x = padding + (width - 2*padding - lon_range*scale)/2
-    offset_y = padding + (height - 2*padding - lat_range*scale)/2
+    # 轨迹实际渲染尺寸
+    rendered_w = lon_range * scale
+    rendered_h = lat_range * scale
+
+    # 水平方向偏移
+    remaining_w = width - 2*padding - rendered_w
+    if h_align == 'left':
+        offset_x = padding
+    elif h_align == 'center':
+        offset_x = padding + remaining_w / 2
+    else:  # right
+        offset_x = padding + remaining_w
+
+    # 竖直方向偏移
+    remaining_h = height - 2*padding - rendered_h
+    if v_align == 'top':
+        offset_y = padding
+    elif v_align == 'center':
+        offset_y = padding + remaining_h / 2
+    else:  # bottom
+        offset_y = padding + remaining_h
 
     # 计算屏幕坐标（注意y轴方向相反），y方向应用额外的缩放
     x = offset_x + (lon - min_lon) * scale
-    y = offset_y + (max_lat - lat) * scale * y_scale
+    y = offset_y + (max_lat - lat) * y_scale * scale
 
     return int(x), int(y)
 
 
 # 为视频添加轨迹水印
 def add_video_watermark(input_video, video_time, output_video, track_data):
-    # 从解析结果中取出所需数据（本模块不做任何轨迹计算）
-    points = track_data["points"]          # 每个点的详细数据（含累计距离/爬升等）
-    track_points = track_data["raw_points"]  # [(lon, lat, elevation), ...]
-    track_times = track_data["raw_times"]    # [datetime, ...]
-
     # 打开视频
     cap = cv2.VideoCapture(input_video)
     if not cap.isOpened():
         print(f"无法打开视频: {input_video}")
         return False
     
+    if not video_time:
+        print("视频创建时间为空")
+        return False
+    
     # 获取视频属性
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS)                        # 视频帧率
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))         # 视频宽度
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))       # 视频高度
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))  # 视频总帧数
     
     # 定义编解码器并创建输出视频写入器
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = cv2.VideoWriter(output_video, fourcc, fps, (width, height))
-    
-    if not video_time:
-        print("视频创建时间为空")
+
+    if not track_data:
+        print("轨迹数据为空")
         return False
 
-    # 计算轨迹边界
-    if not track_points:
-        print("轨迹点为空")
-        return False
+    # 从解析结果中取出所需数据（本模块不做任何轨迹计算）
+    points = track_data["points"]          # 每个点的详细数据（含累计距离/爬升等）
+    track_points = track_data["raw_points"]  # [(lon, lat, elevation), ...]
+    track_times = track_data["raw_times"]    # [datetime, ...]
+    
+    min_lon, max_lon, min_lat, max_lat = calculate_bounds(track_points)
     
     # 轨迹形状水印宽度（固定）
     watermark_width = 450
+    watermark_height = 450
 
-    min_lon, max_lon, min_lat, max_lat = calculate_bounds(track_points)
-    
     # 计算轨迹的长宽比（使用屏幕坐标）
-    # 首先将所有轨迹点转换为屏幕坐标
-    screen_points = []
-    for point in [[min_lon, min_lat, 0], [max_lon, max_lat, 0], [min_lon, max_lat, 0], [max_lon, min_lat, 0]]:
-        lon, lat, _ = point
-        x, y = map_coordinate(lon, lat, min_lon, max_lon, min_lat, max_lat, watermark_width, watermark_width)  # 暂时使用宽度作为高度进行计算
-        screen_points.append((x, y))
-    
-    # 计算屏幕坐标的范围
-    if screen_points:
-        screen_xs = [p[0] for p in screen_points]
-        screen_ys = [p[1] for p in screen_points]
-        screen_width = max(screen_xs) - min(screen_xs)
-        screen_height = max(screen_ys) - min(screen_ys)
-        aspect_ratio = screen_width / screen_height if screen_height > 0 else 1.0
-    else:
-        aspect_ratio = 1.0
-    
+    x0, y0 = map_coordinate(min_lon, min_lat, min_lon, max_lon, min_lat, max_lat, watermark_width, watermark_height)
+    x1, y1 = map_coordinate(max_lon, max_lat, min_lon, max_lon, min_lat, max_lat, watermark_width, watermark_height)
+    screen_width = abs(x1 - x0)
+    screen_height = abs(y1 - y0)
+    aspect_ratio = screen_width / screen_height if screen_height > 0 else 1.0
+    print(f"轨迹的像素宽度：{screen_width}，像素高度：{screen_height}，长宽比: {aspect_ratio:.2f}")
+
     right_border_width = 60
     
     # 时间水印位置和大小（底部右下角）
@@ -164,33 +190,14 @@ def add_video_watermark(input_video, video_time, output_video, track_data):
     elevation_watermark_height = 150
     elevation_watermark_x = width - elevation_watermark_width - right_border_width
     elevation_watermark_y = info2_watermark_y - elevation_watermark_height - 5
-    
 
-    # 轨迹形状水印高度（根据长宽比自适应计算）
-    # 根据轨迹的长宽比自适应计算水印高度
-    watermark_height = int(watermark_width / aspect_ratio)
-    if watermark_height > 400:
-        print(f"水印高度超过400，原始高度: {watermark_height}")
-    elif watermark_height < 200:
-        print(f"水印高度低于200，原始高度: {watermark_height}")
+    # 轨迹形状水印位置（右下角）
+    watermark_x = width - watermark_width - right_border_width  # 右边界，与海拔高度曲线水印对齐
+    watermark_y = elevation_watermark_y - watermark_height - 5  # 轨迹水印在海拔高度曲线水印上方
 
-
-
-    watermark_x = width - watermark_width - right_border_width  # 右边界，与时间水印对齐
-    watermark_y = elevation_watermark_y - watermark_height - 5  # 轨迹水印在时间水印上方
-    
-    # 找到最接近的轨迹点
-    # print(f"视频时间: {video_time}")
-    # print(f"轨迹时间点数量: {len(track_times)}")
-    
-    # 从视频元数据中提取拍摄位置
-
-    video_position_idx_by_time = find_closest_track_point_index(video_time, track_points, track_times)
-    # print(f"时间匹配索引: {video_position_idx_by_time}")
-    video_position_idx = video_position_idx_by_time
-    
-    video_lon, video_lat, elevation = track_points[video_position_idx]
-    # print(f"视频位置: ({video_lon}, {video_lat})")
+    # 找到与视频开始时间最接近的轨迹点
+    video_base_track_idx = find_closest_track_point_index(video_time, track_points, track_times)
+    video_lon, video_lat, elevation = track_points[video_base_track_idx]
     
     # 处理每一帧
     for frame_idx in range(total_frames):
@@ -207,8 +214,8 @@ def add_video_watermark(input_video, video_time, output_video, track_data):
         elevation_watermark[:,:,3] = 0  # 初始全透明
         
         # 绘制完整轨迹（固定不动）
+        # 绘制轨迹线条（先画白色背景，再画绿色线条）
         for i in range(len(track_points) - 1):
-            # 映射坐标到水印空间，y_scale=1.5放大高度方向比例
             x1, y1 = map_coordinate(
                 track_points[i][0], track_points[i][1],
                 min_lon, max_lon, min_lat, max_lat,
@@ -219,13 +226,9 @@ def add_video_watermark(input_video, video_time, output_video, track_data):
                 min_lon, max_lon, min_lat, max_lat,
                 watermark_width, watermark_height
             )
-            
-            # 绘制轨迹线条（先画白色背景，再画绿色线条）
             # 绘制白色背景线条（更粗）
             cv2.line(watermark, (x1, y1), (x2, y2), (255, 255, 255, 200), 6, lineType=cv2.LINE_AA)
-        
         for i in range(len(track_points) - 1):
-            # 映射坐标到水印空间，y_scale放大高度方向比例
             x1, y1 = map_coordinate(
                 track_points[i][0], track_points[i][1],
                 min_lon, max_lon, min_lat, max_lat,
@@ -236,7 +239,6 @@ def add_video_watermark(input_video, video_time, output_video, track_data):
                 min_lon, max_lon, min_lat, max_lat,
                 watermark_width, watermark_height
             )
-            
             # 绘制绿色线条（在白色背景上）
             cv2.line(watermark, (x1, y1), (x2, y2), (0, 255, 0, 200), 3, lineType=cv2.LINE_AA)
 
@@ -260,7 +262,7 @@ def add_video_watermark(input_video, video_time, output_video, track_data):
         elev_range = max_elev - min_elev if max_elev > min_elev else 1
         
         # 绘制海拔高度曲线
-        padding = 20
+        padding = 10
         curve_width = elevation_watermark_width - 2 * padding
         curve_height = elevation_watermark_height - 2 * padding
         
@@ -285,20 +287,21 @@ def add_video_watermark(input_video, video_time, output_video, track_data):
             cv2.line(elevation_watermark, (x1, y1), (x2, y2), (0, 255, 0, 200), 3, lineType=cv2.LINE_AA)
         
         # 标记当前位置在海拔曲线上的点
-        assert(0 <= video_position_idx < len(elevations))
-        current_x = padding + int((video_position_idx / (len(elevations) - 1)) * curve_width)
-        current_y = padding + int((max_elev - elevations[video_position_idx]) / elev_range * curve_height)
+        assert(0 <= video_base_track_idx < len(elevations))
+        current_x = padding + int((video_base_track_idx / (len(elevations) - 1)) * curve_width)
+        current_y = padding + int((max_elev - elevations[video_base_track_idx]) / elev_range * curve_height)
         cv2.circle(elevation_watermark, (current_x, current_y), 8, (0, 0, 255, 200), -1)
         cv2.circle(elevation_watermark, (current_x, current_y), 3, (255, 255, 255, 200), -1)
         
         # 从解析结果中直接取出当前点的累计距离与累计爬升（无需重新计算）
-        current_point = points[video_position_idx]
-        distance_km = current_point["cumulative_distance_km"]
-        elevation_gain = current_point["cumulative_ascent_m"]
+        base_point = points[video_base_track_idx]
+        distance_km = base_point["cumulative_distance_km"]
+        elevation_gain = base_point["cumulative_ascent_m"]
         # 更详细的当前运行信息
-        grade_degree = current_point["grade_degree"]              # 当前坡度（角度 °）
-        pace_min_per_km = current_point["pace_min_per_km"]        # 当前配速 (min/km)
-        cumulative_duration_s = current_point["cumulative_duration_s"]  # 累计用时（秒）
+        grade_degree = base_point["grade_degree"]              # 当前坡度（角度 °）
+        pace_min_per_km = base_point["pace_min_per_km"]        # 当前配速 (min/km)
+        cumulative_duration_s = base_point["cumulative_duration_s"]  # 累计用时（秒）
+        cumulative_duration_s += frame_idx // fps  # 累计用时（秒） + 当前帧时间
 
         # 创建时间水印
         time_watermark = np.zeros((time_watermark_height, time_watermark_width, 4), dtype=np.uint8)
@@ -398,52 +401,53 @@ def add_video_watermark(input_video, video_time, output_video, track_data):
             
             result = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGBA2BGRA)
             img[:] = result
-        
+
+
         # 添加拍摄时间和距离信息（右下角）
-        if video_time:
-            # 从extract_creation_time函数获取的时间是UTC
-            time_str = (video_time + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M")
-            # 里程、爬升、海拔高度 - 显示在上面一行
-            info2_str = f"里程{distance_km:.1f}km 爬升{elevation_gain:.0f}m 海拔{elevation:.0f}m"
+    
+        # video_time是UTC，转换为北京时间
+        time_str = (video_time + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M")
+        # 里程、爬升、海拔高度 - 显示在上面一行
+        info2_str = f"里程{distance_km:.1f}km 爬升{elevation_gain:.0f}m 海拔{elevation:.0f}m"
 
-            # 更详细的当前运行信息：坡度、配速、累计用时 - 显示在下面一行
-            # 累计用时格式化为 H:MM:SS / MM:SS
-            total_sec = int(round(cumulative_duration_s))
-            h, rem = divmod(total_sec, 3600)
-            m, s = divmod(rem, 60)
-            if h > 0:
-                duration_str = f"{h}:{m:02d}:{s:02d}"
-            else:
-                duration_str = f"{m:02d}:{s:02d}"
-            # 配速格式化为 M'SS"（0 表示无有效数据）
-            if pace_min_per_km > 0:
-                pace_m = int(pace_min_per_km)
-                pace_s = int(round((pace_min_per_km - pace_m) * 60))
-                if pace_s == 60:
-                    pace_m += 1
-                    pace_s = 0
-                pace_str = f"{pace_m}'{pace_s:02d}\""
-            else:
-                pace_str = "--'--\""
-            info_str = f"坡度{grade_degree:.0f}° 配速{pace_str}/km"
-            # 将用时信息加入时间行，并放在时间前面
-            time_str = f"用时{duration_str} {time_str}"
+        # 更详细的当前运行信息：坡度、配速、累计用时 - 显示在下面一行
+        # 累计用时格式化为 H:MM:SS / MM:SS
+        total_sec = int(round(cumulative_duration_s))
+        h, rem = divmod(total_sec, 3600)
+        m, s = divmod(rem, 60)
+        if h > 0:
+            duration_str = f"{h}:{m:02d}:{s:02d}"
+        else:
+            duration_str = f"{m:02d}:{s:02d}"
+        # 配速格式化为 M'SS"（0 表示无有效数据）
+        if pace_min_per_km > 0:
+            pace_m = int(pace_min_per_km)
+            pace_s = int(round((pace_min_per_km - pace_m) * 60))
+            if pace_s == 60:
+                pace_m += 1
+                pace_s = 0
+            pace_str = f"{pace_m}'{pace_s:02d}\""
+        else:
+            pace_str = "--'--\""
+        info_str = f"坡度{grade_degree:.0f}° 配速{pace_str}/km"
+        # 将用时信息加入时间行，并放在时间前面
+        time_str = f"用时{duration_str} {time_str}"
 
-            # 字体大小
-            font_scale = 0.8
-            font_thickness = 2
-            font_size = int(font_scale * 30)  # 0.8 * 30 = 24px
+        # 字体大小
+        font_scale = 0.8
+        font_thickness = 2
+        font_size = int(font_scale * 30)  # 0.8 * 30 = 24px
 
-            # 计算文本宽度高度，使文字右对齐
-            (info_width, info_height), _ = get_chinese_text_size(info_str, CHINESE_FONT_PATH, font_size, font_thickness)
-            info_x = info_watermark_width - info_width - 10
-            info_y = (info_watermark_height + info_height) // 2
-            (info2_width, info2_height), _ = get_chinese_text_size(info2_str, CHINESE_FONT_PATH, font_size, font_thickness)
-            info2_x = info2_watermark_width - info2_width - 10
-            info2_y = (info2_watermark_height + info2_height) // 2
-            (time_width, time_height), _ = get_chinese_text_size(time_str, CHINESE_FONT_PATH, font_size, font_thickness)
-            time_x = time_watermark_width - time_width - 10
-            time_y = (time_watermark_height + time_height) // 2
+        # 计算文本宽度高度，使文字右对齐
+        (info_width, info_height), _ = get_chinese_text_size(info_str, CHINESE_FONT_PATH, font_size, font_thickness)
+        info_x = info_watermark_width - info_width - 10
+        info_y = (info_watermark_height + info_height) // 2
+        (info2_width, info2_height), _ = get_chinese_text_size(info2_str, CHINESE_FONT_PATH, font_size, font_thickness)
+        info2_x = info2_watermark_width - info2_width - 10
+        info2_y = (info2_watermark_height + info2_height) // 2
+        (time_width, time_height), _ = get_chinese_text_size(time_str, CHINESE_FONT_PATH, font_size, font_thickness)
+        time_x = time_watermark_width - time_width - 10
+        time_y = (time_watermark_height + time_height) // 2
 
         # 绘制详细运行信息文字（带白色边框）
         put_text_with_border(
@@ -551,3 +555,4 @@ def process_video(args):
         import traceback
         traceback.print_exc()
         return f"处理失败: {video_file}"
+
