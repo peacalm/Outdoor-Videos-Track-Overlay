@@ -36,9 +36,9 @@ DEFAULT_CHINESE_FONT_PATH = "/System/Library/Fonts/STHeiti Medium.ttc"
 
 
 # 找到与给定视频时间最接近的轨迹点索引
-def find_closest_track_point_index(video_time, track_points, track_times):
+def find_closest_track_point_index(video_time, track_times):
     """找到与 video_time 最接近的轨迹点索引"""
-    if not track_times or not track_points:
+    if not track_times:
         raise ValueError("无法获取轨迹时间信息")
 
     min_diff = float('inf')
@@ -52,6 +52,25 @@ def find_closest_track_point_index(video_time, track_points, track_times):
 
     return closest_idx
 
+def find_next_track_point_index(video_time, track_times, current_idx):
+    """找到与 video_time 最接近的下一个轨迹点索引"""
+    if not track_times:
+        raise ValueError("无法获取轨迹时间信息")
+    if current_idx < 0 or current_idx >= len(track_times):
+        raise ValueError(f"当前轨迹点索引 {current_idx} 无效，轨迹点数量为 {len(track_times)}")
+
+    # 从当前轨迹点的下一个开始查找
+    diff = abs((video_time - track_times[current_idx]).total_seconds())
+    idx = current_idx
+    while idx + 1 < len(track_times):
+        next_diff = abs((video_time - track_times[idx+1]).total_seconds())
+        if next_diff < diff:
+            diff = next_diff
+            idx += 1
+        else:
+            break
+
+    return idx
 
 # 计算轨迹的边界，用于坐标映射
 def calculate_bounds(points):
@@ -157,14 +176,14 @@ def add_video_watermark(input_video, video_time, output_video, track_data):
     watermark_width = 450
     watermark_height = 450
 
-    # 计算轨迹的长宽比（使用屏幕坐标）
+    # 计算轨迹的宽高比（使用屏幕坐标）
     # padding参数需与下面一致
     x0, y0 = map_coordinate(min_lon, min_lat, min_lon, max_lon, min_lat, max_lat, watermark_width, watermark_height)
     x1, y1 = map_coordinate(max_lon, max_lat, min_lon, max_lon, min_lat, max_lat, watermark_width, watermark_height)
     screen_width = abs(x1 - x0)
     screen_height = abs(y1 - y0)
     aspect_ratio = screen_width / screen_height if screen_height > 0 else 1.0
-    print(f"轨迹的像素宽度：{screen_width}，像素高度：{screen_height}，长宽比: {aspect_ratio:.2f}")
+    print(f"轨迹的像素宽度：{screen_width}，像素高度：{screen_height}，宽高比: {aspect_ratio:.2f}")
 
     right_border_width = 60
     
@@ -197,14 +216,38 @@ def add_video_watermark(input_video, video_time, output_video, track_data):
     watermark_y = elevation_watermark_y - watermark_height - 5  # 轨迹水印在海拔高度曲线水印上方
 
     # 找到与视频开始时间最接近的轨迹点
-    video_base_track_idx = find_closest_track_point_index(video_time, track_points, track_times)
-    video_lon, video_lat, elevation = track_points[video_base_track_idx]
+    video_base_track_idx = find_closest_track_point_index(video_time, track_times)
+    base_point = points[video_base_track_idx]
     
+    match_idx = video_base_track_idx
+    match_point = base_point
+    video_current_frame_time = video_time
+    update_match_per_second = 3
+
     # 处理每一帧
     for frame_idx in range(total_frames):
         ret, frame = cap.read()
         if not ret:
             break
+
+        video_display_seconds = frame_idx // int(fps)
+        video_current_frame_time = video_time + timedelta(seconds=video_display_seconds)
+
+        # 从轨迹点中取出当前帧对应的点
+        if frame_idx > 0 and frame_idx % int(fps * update_match_per_second) == 0:
+            match_idx = find_next_track_point_index(video_current_frame_time, track_times, match_idx)
+            match_point = points[match_idx]
+
+        video_lon, video_lat, elevation = track_points[match_idx]
+
+        distance_km     = match_point["cumulative_distance_km"] # 当前里程（公里）
+        elevation_gain  = match_point["cumulative_ascent_m"]    # 当前爬升（米）
+        grade_degree    = match_point["grade_degree"]           # 当前坡度（角度 °）
+        pace_min_per_km = match_point["pace_min_per_km"]        # 当前配速 (min/km)
+
+        # 使用base_point的累计用时，加上当前帧时间
+        base_cumulative_duration_s = base_point["cumulative_duration_s"]  # 视频开始点累计用时（秒）
+        cumulative_duration_s = base_cumulative_duration_s + video_display_seconds  # 当前累计用时（秒
         
         # 创建水印图层
         watermark = np.zeros((watermark_height, watermark_width, 4), dtype=np.uint8)
@@ -214,8 +257,7 @@ def add_video_watermark(input_video, video_time, output_video, track_data):
         elevation_watermark = np.zeros((elevation_watermark_height, elevation_watermark_width, 4), dtype=np.uint8)
         elevation_watermark[:,:,3] = 0  # 初始全透明
         
-        # 绘制完整轨迹（固定不动）
-        # 绘制轨迹线条（先画白色背景，再画绿色线条）
+        # 绘制完整轨迹，固定不动，先画白色背景，再画绿色线条
         for i in range(len(track_points) - 1):
             x1, y1 = map_coordinate(
                 track_points[i][0], track_points[i][1],
@@ -243,13 +285,12 @@ def add_video_watermark(input_video, video_time, output_video, track_data):
             # 绘制绿色线条（在白色背景上）
             cv2.line(watermark, (x1, y1), (x2, y2), (0, 255, 0, 200), 3, lineType=cv2.LINE_AA)
 
-        # 绘制视频拍摄位置标记，y_scale放大高度方向比例
+        # 绘制视频拍摄位置标记
         cx, cy = map_coordinate(
             video_lon, video_lat,
             min_lon, max_lon, min_lat, max_lat,
             watermark_width, watermark_height
         )
-        # 绘制当前位置标记（红色，进一步增大大小）
         cv2.circle(watermark, (cx, cy), 8, (0, 0, 255, 200), -1)
         cv2.circle(watermark, (cx, cy), 3, (255, 255, 255, 200), -1)
         
@@ -288,33 +329,12 @@ def add_video_watermark(input_video, video_time, output_video, track_data):
             cv2.line(elevation_watermark, (x1, y1), (x2, y2), (0, 255, 0, 200), 3, lineType=cv2.LINE_AA)
         
         # 标记当前位置在海拔曲线上的点
-        assert(0 <= video_base_track_idx < len(elevations))
-        current_x = padding + int((video_base_track_idx / (len(elevations) - 1)) * curve_width)
-        current_y = padding + int((max_elev - elevations[video_base_track_idx]) / elev_range * curve_height)
+        assert(0 <= match_idx < len(elevations))
+        current_x = padding + int((match_idx / (len(elevations) - 1)) * curve_width)
+        current_y = padding + int((max_elev - elevations[match_idx]) / elev_range * curve_height)
         cv2.circle(elevation_watermark, (current_x, current_y), 8, (0, 0, 255, 200), -1)
         cv2.circle(elevation_watermark, (current_x, current_y), 3, (255, 255, 255, 200), -1)
         
-        # 从解析结果中直接取出当前点的累计距离与累计爬升（无需重新计算）
-        base_point = points[video_base_track_idx]
-        distance_km = base_point["cumulative_distance_km"]
-        elevation_gain = base_point["cumulative_ascent_m"]
-        # 更详细的当前运行信息
-        grade_degree = base_point["grade_degree"]              # 当前坡度（角度 °）
-        pace_min_per_km = base_point["pace_min_per_km"]        # 当前配速 (min/km)
-        cumulative_duration_s = base_point["cumulative_duration_s"]  # 累计用时（秒）
-        cumulative_duration_s += frame_idx // fps  # 累计用时（秒） + 当前帧时间
-
-        # 创建时间水印
-        time_watermark = np.zeros((time_watermark_height, time_watermark_width, 4), dtype=np.uint8)
-        time_watermark[:,:,3] = 0
-
-        # 创建信息水印
-        info_watermark = np.zeros((info_watermark_height, info_watermark_width, 4), dtype=np.uint8)
-        info_watermark[:,:,3] = 0
-
-        # 创建详细运行信息水印（坡度/配速/累计用时）
-        info2_watermark = np.zeros((info2_watermark_height, info2_watermark_width, 4), dtype=np.uint8)
-        info2_watermark[:,:,3] = 0
 
         def get_chinese_text_size(text, font_path, font_size, thickness=0):
             """
@@ -404,10 +424,20 @@ def add_video_watermark(input_video, video_time, output_video, track_data):
             img[:] = result
 
 
-        # 添加拍摄时间和距离信息（右下角）
-    
-        # video_time是UTC，转换为北京时间
-        time_str = (video_time + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M")
+        # 创建时间水印
+        time_watermark = np.zeros((time_watermark_height, time_watermark_width, 4), dtype=np.uint8)
+        time_watermark[:,:,3] = 0
+
+        # 创建信息水印
+        info_watermark = np.zeros((info_watermark_height, info_watermark_width, 4), dtype=np.uint8)
+        info_watermark[:,:,3] = 0
+
+        # 创建详细运行信息水印（坡度/配速/累计用时）
+        info2_watermark = np.zeros((info2_watermark_height, info2_watermark_width, 4), dtype=np.uint8)
+        info2_watermark[:,:,3] = 0
+
+        # video_current_frame_time是UTC，转换为北京时间
+        time_str = (video_current_frame_time + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M")
         # 里程、爬升、海拔高度 - 显示在上面一行
         info2_str = f"里程{distance_km:.1f}km 爬升{elevation_gain:.0f}m 海拔{elevation:.0f}m"
 
