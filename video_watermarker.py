@@ -83,6 +83,23 @@ def calculate_bounds(points):
     return min_lon, max_lon, min_lat, max_lat
 
 
+def format_pace(pace_min_per_km):
+    """将配速（min/km，float）格式化为可视化字符串 M'SS"。
+
+    当配速 <= 0（无有效数据）时返回 "--'--\""。
+    处理四舍五入进位：若秒数恰为 60，则向分钟进 1，秒归零。
+    """
+    if pace_min_per_km > 0:
+        pace_m = int(pace_min_per_km)
+        pace_s = int(round((pace_min_per_km - pace_m) * 60))
+        if pace_s == 60:
+            pace_m += 1
+            pace_s = 0
+        return f"{pace_m}'{pace_s:02d}\""
+    else:
+        return "--'--\""
+
+
 def map_coordinate(lon, lat, min_lon, max_lon, min_lat, max_lat, width, height,
                    padding=10, y_scale=1.1, h_align='right', v_align='bottom'):
     """
@@ -244,6 +261,7 @@ def add_video_watermark(input_video, video_time, output_video, track_data):
         elevation_gain  = match_point["cumulative_ascent_m"]    # 当前爬升（米）
         grade_degree    = match_point["grade_degree"]           # 当前坡度（角度 °）
         pace_min_per_km = match_point["pace_min_per_km"]        # 当前配速 (min/km)
+        last_1km_pace_min_per_km = match_point["last_1km_pace_min_per_km"]  # 最近1km配速 (min/km)，不足1km时使用已跑距离的平均配速
 
         # 使用base_point的累计用时，加上当前帧时间
         base_cumulative_duration_s = base_point["cumulative_duration_s"]  # 视频开始点累计用时（秒）
@@ -450,17 +468,12 @@ def add_video_watermark(input_video, video_time, output_video, track_data):
             duration_str = f"{h}:{m:02d}:{s:02d}"
         else:
             duration_str = f"{m:02d}:{s:02d}"
+        
         # 配速格式化为 M'SS"（0 表示无有效数据）
-        if pace_min_per_km > 0:
-            pace_m = int(pace_min_per_km)
-            pace_s = int(round((pace_min_per_km - pace_m) * 60))
-            if pace_s == 60:
-                pace_m += 1
-                pace_s = 0
-            pace_str = f"{pace_m}'{pace_s:02d}\""
-        else:
-            pace_str = "--'--\""
-        info_str = f"坡度{grade_degree:.0f}° 配速{pace_str}/km"
+        # pace_str = format_pace(pace_min_per_km)
+        last_1km_pace_str = format_pace(last_1km_pace_min_per_km)
+        
+        info_str = f"坡度{grade_degree:.0f}° 配速{last_1km_pace_str}/km"
         # 将用时信息加入时间行，并放在时间前面
         time_str = f"用时{duration_str} {time_str}"
 

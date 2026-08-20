@@ -18,18 +18,20 @@
     },
     "points": [
         {
-            "lon": float,                  # 经度
-            "lat": float,                  # 纬度
-            "elevation": float,            # 海拔高度（米）
-            "time": datetime,              # 时间（datetime 对象）
-            "cumulative_distance_km": float,  # 累计距离（公里）
-            "cumulative_ascent_m": float,    # 累计爬升高度（米）
-            "cumulative_descent_m": float,   # 累计下降高度（米）
-            "cumulative_duration_s": float,  # 累计用时（秒，从轨迹起点到当前点）
-            "grade_percent": float,        # 当前坡度 (%)
-            "grade_degree": float,         # 当前坡度（角度，-90~+90，单位 °）
-            "pace_min_per_km": float,      # 当前配速 (min/km)
-            "speed_km_per_h": float        # 当前速度 (km/h)
+            "lon": float,                          # 经度
+            "lat": float,                          # 纬度
+            "elevation": float,                    # 海拔高度（米）
+            "time": datetime,                      # 时间（datetime 对象）
+            "cumulative_distance_km": float,       # 累计距离（公里）
+            "cumulative_ascent_m": float,          # 累计爬升高度（米）
+            "cumulative_descent_m": float,         # 累计下降高度（米）
+            "cumulative_duration_s": float,        # 累计用时（秒，从轨迹起点到当前点）
+            "grade_percent": float,                # 当前坡度 (%)
+            "grade_degree": float,                 # 当前坡度（角度，-90~+90，单位 °）
+            "pace_min_per_km": float,              # 当前配速 (min/km)
+            "speed_km_per_h": float,               # 当前速度 (km/h)
+            "last_1km_pace_min_per_km": float,     # 最近1km配速 (min/km)，不足1km时使用已跑距离的平均配速
+            "last_1km_speed_km_per_h": float       # 最近1km平均速度 (km/h)，不足1km时使用已跑距离的平均速度
         },
         ...
     ],
@@ -320,6 +322,9 @@ def _build_result(points, times, smooth_window=5):
     cum_dist = 0.0
     cum_duration = 0.0
 
+    # 最近1km窗口的起始点索引（双指针，随累计距离单调递增）
+    start_idx_1km = 0
+
     for i in range(n):
         lon, lat, ele = points[i]
         if ele > max_elevation:
@@ -386,6 +391,24 @@ def _build_result(points, times, smooth_window=5):
             speed_kmh = 0.0
             pace_min_per_km = 0.0
 
+        # 最近1km配速/速度（使用双指针，确保窗口距离 <= 1km；不足1km时使用从起点到当前点的全部数据）
+        if i == 0:
+            last_1km_pace_min_per_km = 0.0
+            last_1km_speed_km_per_h = 0.0
+        else:
+            target_1km_dist = cum_dist - 1.0
+            while start_idx_1km < i and result_points[start_idx_1km]["cumulative_distance_km"] < target_1km_dist:
+                start_idx_1km += 1
+            start_pt_1km = result_points[start_idx_1km]
+            last_1km_dist_km = cum_dist - start_pt_1km["cumulative_distance_km"]
+            last_1km_time_s = cum_duration - start_pt_1km["cumulative_duration_s"]
+            if last_1km_time_s > 0 and last_1km_dist_km > 0:
+                last_1km_pace_min_per_km = last_1km_time_s / 60.0 / last_1km_dist_km
+                last_1km_speed_km_per_h = last_1km_dist_km / (last_1km_time_s / 3600.0)
+            else:
+                last_1km_pace_min_per_km = 0.0
+                last_1km_speed_km_per_h = 0.0
+
         result_points.append({
             "lon": lon,
             "lat": lat,
@@ -399,6 +422,8 @@ def _build_result(points, times, smooth_window=5):
             "grade_degree": grade_degree,
             "pace_min_per_km": pace_min_per_km,
             "speed_km_per_h": speed_kmh,
+            "last_1km_pace_min_per_km": last_1km_pace_min_per_km,
+            "last_1km_speed_km_per_h": last_1km_speed_km_per_h,
         })
 
     # 总用时
