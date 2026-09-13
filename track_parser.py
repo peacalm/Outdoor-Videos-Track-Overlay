@@ -399,6 +399,9 @@ def _build_result(points, times, smooth_window=5):
             target_1km_dist = cum_dist - 1.0
             while start_idx_1km < i and result_points[start_idx_1km]["cumulative_distance_km"] < target_1km_dist:
                 start_idx_1km += 1
+            # 单段距离超过1km时，start_idx_1km可能自增到i，此时钳制到最后一个有效点result_points[i-1]
+            start_idx_1km = min(start_idx_1km, i - 1)
+
             start_pt_1km = result_points[start_idx_1km]
             last_1km_dist_km = cum_dist - start_pt_1km["cumulative_distance_km"]
             last_1km_time_s = cum_duration - start_pt_1km["cumulative_duration_s"]
