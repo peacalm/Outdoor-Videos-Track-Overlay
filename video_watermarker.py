@@ -262,6 +262,7 @@ def add_video_watermark(input_video, video_time, output_video, track_data):
         grade_degree    = match_point["grade_degree"]           # 当前坡度（角度 °）
         pace_min_per_km = match_point["pace_min_per_km"]        # 当前配速 (min/km)
         last_1km_pace_min_per_km = match_point["last_1km_pace_min_per_km"]  # 最近1km配速 (min/km)，不足1km时使用已跑距离的平均配速
+        heart_rate      = match_point.get("heart_rate")          # 当前心率（次/分，无数据为 None）
 
         # 使用base_point的累计用时，加上当前帧时间
         base_cumulative_duration_s = base_point["cumulative_duration_s"]  # 视频开始点累计用时（秒）
@@ -473,7 +474,9 @@ def add_video_watermark(input_video, video_time, output_video, track_data):
         # pace_str = format_pace(pace_min_per_km)
         last_1km_pace_str = format_pace(last_1km_pace_min_per_km)
         
-        info_str = f"坡度{grade_degree:.0f}° 配速{last_1km_pace_str}/km"
+        info_str = f"配速{last_1km_pace_str}/km 坡度{grade_degree:.0f}°"
+        if heart_rate is not None:
+            info_str += f" 心率{heart_rate:.0f}bpm"
         # 将用时信息加入时间行，并放在时间前面
         time_str = f"用时{duration_str} {time_str}"
 

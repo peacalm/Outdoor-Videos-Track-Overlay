@@ -13,7 +13,7 @@ from video_info_parser import extract_creation_time
 from video_watermarker import process_video
 
 
-def select_track_file(input_dir, preferred_exts=('.kml', '.gpx')):
+def select_track_file(input_dir, preferred_exts=('.kml', '.gpx', '.fit')):
     """在输入目录中查找轨迹文件。
 
     - 没有找到时返回 None
@@ -49,17 +49,18 @@ def select_track_file(input_dir, preferred_exts=('.kml', '.gpx')):
         print("输入无效，请重新输入。")
 
 
-def main(input_dir='input', output_dir='output', workers=None, filename_pattern=None):
+def main(input_dir='input', output_dir='output', workers=None, filename_pattern=None, track_file=None):
     # 并发度默认使用 CPU 核心数
     if workers is None:
         workers = multiprocessing.cpu_count()
     # 确保输出目录存在
     os.makedirs(output_dir, exist_ok=True)
     
-    # 查找轨迹文件（支持 .kml / .gpx），多个时由用户选择
-    track_file = select_track_file(input_dir)
+    # 若未显式指定轨迹文件，则从输入目录自动查找（支持 .kml / .gpx / .fit）
+    if track_file is None:
+        track_file = select_track_file(input_dir)
     if not track_file:
-        print(f"未找到轨迹文件（支持 .kml / .gpx）, input_dir: {input_dir}")
+        print(f"未找到轨迹文件（支持 .kml / .gpx / .fit）, input_dir: {input_dir}")
         return
     
     print(f"使用轨迹文件: {track_file}")
@@ -150,5 +151,9 @@ if __name__ == "__main__":
         help="文件名模式，不含扩展名，用于从文件名中提取时间，默认: None。"
              "例如'VID_%%Y%%m%%d_%%H%%M%%S'",
     )
+    parser.add_argument(
+        "-t", "--track-file", default=None,
+        help="指定轨迹文件路径（.kml/.gpx/.fit），不指定则自动在输入目录查找",
+    )
     args = parser.parse_args()
-    main(args.input_dir, args.output_dir, args.workers, args.filename_pattern)
+    main(args.input_dir, args.output_dir, args.workers, args.filename_pattern, args.track_file)
