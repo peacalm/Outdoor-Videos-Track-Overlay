@@ -2,7 +2,7 @@
 """
 轨迹文件解析模块
 
-支持格式: .kml, .gpx
+支持格式: .kml, .gpx, .fit（Garmin / COROS 高驰等，额外支持心率）
 
 输出统一格式:
 {
@@ -14,7 +14,10 @@
         "min_elevation_m": float,          # 最低海拔（米）
         "total_duration_s": float,         # 累计用时（秒）
         "avg_pace_min_per_km": float,      # 平均配速（分钟/公里）
-        "avg_speed_km_per_h": float        # 平均速度（公里/小时）
+        "avg_speed_km_per_h": float,       # 平均速度（公里/小时）
+        "avg_heart_rate": float,           # 平均心率（次/分，无心率数据为 0）
+        "max_heart_rate": float,           # 最大心率（次/分）
+        "min_heart_rate": float            # 最小心率（次/分）
     },
     "points": [
         {
@@ -22,6 +25,7 @@
             "lat": float,                          # 纬度
             "elevation": float,                    # 海拔高度（米）
             "time": datetime,                      # 时间（datetime 对象）
+            "heart_rate": float|None,              # 心率（次/分，无数据为 None）
             "cumulative_distance_km": float,       # 累计距离（公里）
             "cumulative_ascent_m": float,          # 累计爬升高度（米）
             "cumulative_descent_m": float,         # 累计下降高度（米）
@@ -50,6 +54,12 @@ try:
     HAS_SCIPY = True
 except ImportError:
     HAS_SCIPY = False
+
+try:
+    from fitdecode import FitReader, FitDataMessage
+    HAS_FITDECODE = True
+except ImportError:
+    HAS_FITDECODE = False
 
 
 # ---------------------------------------------------------------------------
@@ -296,12 +306,78 @@ def _parse_gpx(gpx_file):
 
 
 # ---------------------------------------------------------------------------
+# FIT 解析（Garmin / COROS 高驰等运动手表，额外支持心率）
+# ---------------------------------------------------------------------------
+
+# FIT 经纬度单位为“半圆”（semicircles），需乘以此系数转为角度
+_FIT_SEMICIRCLE_TO_DEG = 180.0 / (2 ** 31)
+
+
+def _parse_fit(fit_file):
+    """从 FIT 文件中读取轨迹点、时间与心率，返回 (points, times, heart_rates)
+
+    points     : [(lon, lat, elevation), ...]
+    times      : [datetime, ...]，naive UTC（与 KML/GPX 的时间保持一致）
+    heart_rates: [float|None, ...]，与 points 等长，某点无心率时为 None
+    """
+    if not HAS_FITDECODE:
+        raise ValueError("解析 .fit 需要安装 fitdecode：pip install fitdecode")
+
+    def _value(frame, name):
+        return frame.get_value(name) if frame.has_field(name) else None
+
+    track_points = []
+    track_times = []
+    heart_rates = []
+    elevations = []
+
+    with FitReader(fit_file) as fit:
+        for frame in fit:
+            if not isinstance(frame, FitDataMessage) or frame.name != 'record':
+                continue
+
+            lat_raw = _value(frame, 'position_lat')
+            lon_raw = _value(frame, 'position_long')
+            ts = _value(frame, 'timestamp')
+            if lat_raw is None or lon_raw is None or ts is None:
+                continue
+
+            lat = lat_raw * _FIT_SEMICIRCLE_TO_DEG
+            lon = lon_raw * _FIT_SEMICIRCLE_TO_DEG
+
+            ele = _value(frame, 'enhanced_altitude')
+            if ele is None:
+                ele = _value(frame, 'altitude')
+            if ele is None:
+                ele = 0.0
+
+            heart_rates.append(_value(frame, 'heart_rate'))
+            elevations.append(ele)
+            track_points.append((lon, lat, ele))
+
+            # FIT 时间戳为带时区的 UTC，转为 naive UTC 以匹配现有管道
+            ts_naive = ts.replace(tzinfo=None) if ts.tzinfo is not None else ts
+            track_times.append(ts_naive)
+
+    if not track_points:
+        raise ValueError("无法从 FIT 中解析到轨迹点")
+
+    # 海拔中值滤波
+    elevations_filtered = _filter_elevations(elevations)
+    track_points = [(p[0], p[1], elevations_filtered[i])
+                    for i, p in enumerate(track_points)]
+
+    return track_points, track_times, heart_rates
+
+
+# ---------------------------------------------------------------------------
 # 计算派生数据（summary & 各点的坡度/配速/速度等）
 # ---------------------------------------------------------------------------
 
-def _build_result(points, times, smooth_window=5):
-    """根据原始 points/times 构建统一格式的解析结果
+def _build_result(points, times, heart_rates=None, smooth_window=5):
+    """根据原始 points/times（可选 heart_rates）构建统一格式的解析结果
 
+    heart_rates: 与 points 等长的心率列表，元素可为 None；未提供时为全 None。
     smooth_window: 计算当前点坡度/配速/速度时所使用的最近点数量（>=2）。
                    为减小相邻两点带来的抖动误差，默认使用最近 5 个点的
                    累计数据来计算窗口内的平均坡度与配速。
@@ -311,6 +387,9 @@ def _build_result(points, times, smooth_window=5):
 
     if smooth_window < 2:
         smooth_window = 2
+
+    if heart_rates is None:
+        heart_rates = [None] * len(points)
 
     n = len(points)
     result_points = []
@@ -417,6 +496,7 @@ def _build_result(points, times, smooth_window=5):
             "lat": lat,
             "elevation": ele,
             "time": times[i],
+            "heart_rate": heart_rates[i],
             "cumulative_distance_km": cum_dist,
             "cumulative_ascent_m": total_ascent,
             "cumulative_descent_m": total_descent,
@@ -448,6 +528,17 @@ def _build_result(points, times, smooth_window=5):
     if min_elevation == float('inf'):
         min_elevation = 0.0
 
+    # 心率统计（仅统计有效值，无心率数据时为 0.0）
+    hr_values = [h for h in heart_rates if h is not None]
+    if hr_values:
+        avg_heart_rate = sum(hr_values) / len(hr_values)
+        max_heart_rate = max(hr_values)
+        min_heart_rate = min(hr_values)
+    else:
+        avg_heart_rate = 0.0
+        max_heart_rate = 0.0
+        min_heart_rate = 0.0
+
     summary = {
         "total_distance_km": total_distance,
         "total_ascent_m": total_ascent,
@@ -457,6 +548,9 @@ def _build_result(points, times, smooth_window=5):
         "total_duration_s": total_duration_s,
         "avg_pace_min_per_km": avg_pace_min_per_km,
         "avg_speed_km_per_h": avg_speed_kmh,
+        "avg_heart_rate": avg_heart_rate,
+        "max_heart_rate": max_heart_rate,
+        "min_heart_rate": min_heart_rate,
     }
 
     # 兼容旧接口的简化字段
@@ -476,7 +570,7 @@ def _build_result(points, times, smooth_window=5):
 # ---------------------------------------------------------------------------
 
 def parse_track_file(track_file, smooth_window=5):
-    """解析轨迹文件（支持 .kml / .gpx），返回统一格式结果
+    """解析轨迹文件（支持 .kml / .gpx / .fit），返回统一格式结果
 
     smooth_window: 计算坡度/配速/速度时使用的最近点数量（默认 5），
                    用于减小仅依赖相邻两点带来的抖动误差。
@@ -485,18 +579,21 @@ def parse_track_file(track_file, smooth_window=5):
         raise FileNotFoundError("轨迹文件不存在: %s" % track_file)
 
     ext = os.path.splitext(track_file)[1].lower()
+    heart_rates = None
     if ext == '.kml':
         points, times = _parse_kml(track_file)
     elif ext == '.gpx':
         points, times = _parse_gpx(track_file)
+    elif ext == '.fit':
+        points, times, heart_rates = _parse_fit(track_file)
     else:
-        raise ValueError("不支持的轨迹文件格式: %s（仅支持 .kml / .gpx）" % ext)
+        raise ValueError("不支持的轨迹文件格式: %s（仅支持 .kml / .gpx / .fit）" % ext)
 
-    return _build_result(points, times, smooth_window=smooth_window)
+    return _build_result(points, times, heart_rates=heart_rates, smooth_window=smooth_window)
 
 
 def visualize_track(result, output_file=None):
-    """将轨迹解析结果可视化，包含轨迹形状、海拔、速度、坡度曲线图。
+    """将轨迹解析结果可视化，包含轨迹形状、海拔、速度、坡度曲线图（有数据时叠加心率曲线）。
 
     result: parse_track_file 返回的解析结果字典
     output_file: 输出图片路径，为 None 时直接弹窗显示
@@ -515,6 +612,8 @@ def visualize_track(result, output_file=None):
     speeds = [p["speed_km_per_h"] for p in points]
     grades = [p["grade_degree"] for p in points]
     distances = [p["cumulative_distance_km"] for p in points]
+    heart_rates = [p.get("heart_rate") for p in points]
+    has_hr = any(h is not None for h in heart_rates)
 
     import matplotlib.gridspec as gridspec
 
@@ -536,6 +635,12 @@ def visualize_track(result, output_file=None):
         f"Avg Speed: {summary['avg_speed_km_per_h']:.1f} km/h  |  "
         f"Avg Pace: {summary['avg_pace_min_per_km']:.1f} min/km"
     )
+    if has_hr:
+        summary_text += (
+            f"\nAvg HR: {summary['avg_heart_rate']:.0f} bpm  |  "
+            f"Max HR: {summary['max_heart_rate']:.0f} bpm  |  "
+            f"Min HR: {summary['min_heart_rate']:.0f} bpm"
+        )
     ax_summary.text(
         0.5, 0.5, summary_text, transform=ax_summary.transAxes,
         fontsize=11, verticalalignment='center', horizontalalignment='center',
@@ -575,6 +680,13 @@ def visualize_track(result, output_file=None):
     ax_speed.set_ylabel("Speed (km/h)")
     ax_speed.set_title("Speed")
     ax_speed.grid(True, alpha=0.3)
+
+    # 心率曲线（与速度共用横轴，右轴显示，仅当存在心率数据时绘制）
+    if has_hr:
+        ax_hr = ax_speed.twinx()
+        ax_hr.plot(distances, heart_rates, linewidth=1.0, color="#E91E63")
+        ax_hr.set_ylabel("Heart Rate (bpm)")
+        ax_hr.grid(False)
 
     # --- 右下：坡度曲线 ---
     ax_grade = fig.add_subplot(gs[2, 1])
