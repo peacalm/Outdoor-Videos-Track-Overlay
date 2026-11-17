@@ -10,7 +10,7 @@ import os
 
 from track_parser import parse_track_file
 from video_info_parser import extract_creation_time
-from video_watermarker import process_video
+from video_watermarker import process_video, process_image, IMAGE_EXTS, is_motion_photo
 
 
 def select_track_file(input_dir, preferred_exts=('.kml', '.gpx', '.fit')):
@@ -88,13 +88,16 @@ def main(input_dir='input', output_dir='output', workers=None, filename_patterns
         print("轨迹点或时间点为空")
         return
 
-    # 找到所有MP4视频文件
-    video_files = [f for f in os.listdir(input_dir) if f.endswith('.mp4')]
-    if not video_files:
-        print(f"未找到MP4视频文件, input_dir: {input_dir}")
+    # 找到所有 MP4 视频文件
+    video_files = [f for f in os.listdir(input_dir) if f.lower().endswith('.mp4')]
+    # 找到所有图片文件（静态图 / 动图 GIF）
+    image_files = [f for f in os.listdir(input_dir) if f.lower().endswith(IMAGE_EXTS)]
+
+    if not video_files and not image_files:
+        print(f"未找到视频或图片文件, input_dir: {input_dir}")
         return
-    
-    # 准备进程池参数
+
+    # 准备视频进程池参数
     pool_args = []
     failed_videos = []
     for video_file in video_files:
@@ -109,34 +112,65 @@ def main(input_dir='input', output_dir='output', workers=None, filename_patterns
             continue
         output_video = os.path.join(output_dir, output_filename)
         pool_args.append((input_video, video_time, output_video, track_data))
-    
+
     if failed_videos:
         print(f"未成功提取 {len(failed_videos)} 个视频的创建时间:")
         for video_file in failed_videos:
             print(f"  {video_file}")
-    
-    if not pool_args:
-        print("所有视频创建时间提取失败，无法继续处理")
-        return
 
     # 使用多进程处理视频
-    print(f"开始并发处理 {len(video_files)} 个视频（并发度: {workers}）")
-    with multiprocessing.Pool(processes=workers) as pool:
-        results = pool.map(process_video, pool_args)
-    
-    # 打印处理结果
-    print("\n处理结果:")
-    for result in results:
-        print(result)
+    if pool_args:
+        print(f"开始并发处理 {len(pool_args)} 个视频（并发度: {workers}）")
+        with multiprocessing.Pool(processes=workers) as pool:
+            video_results = pool.map(process_video, pool_args)
+
+        print("\n视频处理结果:")
+        for result in video_results:
+            print(result)
+
+    # 准备图片处理参数（静态图直接加水印，动图 GIF 转成视频）
+    failed_images = []
+    image_args = []
+    for image_file in image_files:
+        input_image = os.path.join(input_dir, image_file)
+        image_time = extract_creation_time(input_image, filename_patterns)
+        if not image_time:
+            failed_images.append(image_file)
+            continue
+        time_prefix = image_time.strftime("%Y%m%d_%H%M%S")
+        ext = os.path.splitext(image_file)[1].lower()
+        if ext == '.gif' or is_motion_photo(input_image):
+            output_filename = f"{time_prefix}_{os.path.splitext(image_file)[0]}.mp4"
+        else:
+            output_filename = f"{time_prefix}_{image_file}"
+        output_image = os.path.join(output_dir, output_filename)
+        image_args.append((input_image, image_time, output_image, track_data))
+
+    if failed_images:
+        print(f"未成功提取 {len(failed_images)} 个图片的创建时间:")
+        for image_file in failed_images:
+            print(f"  {image_file}")
+
+    # 处理图片（单帧，串行处理即可）
+    if image_args:
+        print(f"开始处理 {len(image_args)} 个图片")
+        image_results = [process_image(args) for args in image_args]
+
+        print("\n图片处理结果:")
+        for result in image_results:
+            print(result)
+
+    if not pool_args and not image_args:
+        print("所有视频/图片创建时间提取失败，无法继续处理")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="为户外视频批量添加轨迹水印"
+        description="为户外视频/图片批量添加轨迹水印"
     )
     parser.add_argument(
         "-i", "--input-dir", default="input",
-        help="输入文件夹名字（包含轨迹文件和 MP4 视频），默认: input",
+        help="输入文件夹名字（包含轨迹文件和 MP4 视频/图片），默认: input",
     )
     parser.add_argument(
         "-o", "--output-dir", default="output",
@@ -146,8 +180,9 @@ if __name__ == "__main__":
         "-w", "--workers", type=int, default=multiprocessing.cpu_count(),
         help="并发处理视频的并发度，默认: CPU 核心数 (%d)" % multiprocessing.cpu_count(),
     )
+    default_patterns = ['VID_%Y%m%d_%H%M%S', 'IMG_%Y%m%d_%H%M%S', 'picture_%Y_%m_%d_%H_%M_%S']
     parser.add_argument(
-        "-p", "--filename-patterns", nargs='+', default=None,
+        "-p", "--filename-patterns", nargs='+', default=default_patterns,
         help="文件名模式（可传多个），不含扩展名，用于从文件名中提取时间，默认: None。"
              "例如'VID_%%Y%%m%%d_%%H%%M%%S'，多个模式用空格分隔",
     )

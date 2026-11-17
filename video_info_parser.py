@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-视频信息解析模块
+视频/图片信息解析模块
 
 对外接口:
-  - extract_creation_time(video_file, filename_pattern=None) -> datetime | None
-      提取视频拍摄/创建时间（UTC），按以下优先级依次尝试：
-      1. 从文件名中提取（需提供 filename_pattern，将文件名视为北京时间并转 UTC）
-      2. ffprobe 读取视频元数据
-      3. 文件系统时间戳（将文件系统时间视为北京时间并转 UTC）
-      4. moviepy 读取视频元数据
-      5. mutagen 读取 MP4 元数据
+  - extract_creation_time(video_file, filename_patterns=None) -> datetime | None
+      提取视频/图片拍摄/创建时间（UTC），按以下优先级依次尝试：
+      1. 从文件名中提取（需提供 filename_patterns，将文件名视为北京时间并转 UTC）
+      2. 图片 EXIF 拍摄时间（视为北京时间并转 UTC）
+      3. ffprobe 读取视频元数据
+      4. 文件系统时间戳（将文件系统时间视为北京时间并转 UTC）
+      5. moviepy 读取视频元数据
+      6. mutagen 读取 MP4 元数据
 
   - extract_creation_location(video_file) -> (lon, lat) | None
       使用 ffprobe 从视频元数据中提取 GPS 位置信息。
@@ -36,6 +37,7 @@ _TIME_FORMATS = [
     "%Y/%m/%d %H:%M:%S",
     "%Y-%m-%d %H:%M:%S.%f",
     "%Y/%m/%d %H:%M:%S.%f",
+    "%Y:%m:%d %H:%M:%S",  # EXIF 常见格式，如 "2026:11:14 14:22:27"
     "%a %b %d %H:%M:%S %Y",
     "UTC %Y-%m-%d %H:%M:%S",
     "%Y-%m-%d",
@@ -104,6 +106,50 @@ def _try_filename_time(video_file, filename_patterns, utc_offset_hours=-8):
 
     print(f"文件名中未匹配到任何时间模式: {video_file_basename_noext}")
     return None
+
+def _try_exif_time(video_file, utc_offset_hours=-8):
+    """使用 Pillow 读取图片 EXIF 中的拍摄时间（DateTimeOriginal 等）。
+
+    EXIF 时间通常是相机本地时间（无时区），与文件名/文件系统时间一致，
+    视为北京时间并转换为 UTC。
+
+    部分手机（如小米）不写标准 DateTimeOriginal 字段，而是把时间存入 MakerNote，
+    此时回退为直接在文件字节中搜索 'YYYY:MM:DD HH:MM:SS' 时间串。
+    """
+    try:
+        from PIL import Image
+        img = Image.open(video_file)
+        exif = img.getexif()
+        # 36867=DateTimeOriginal, 36868=DateTimeDigitized, 306=DateTime
+        for tag in (36867, 36868, 306):
+            val = exif.get(tag)
+            if not val:
+                continue
+            dt = _parse_datetime(str(val).strip())
+            if dt is not None:
+                utc_time = dt + timedelta(hours=utc_offset_hours)
+                print(f"✓ 从EXIF提取到时间: {val} -> UTC {utc_time}")
+                return utc_time
+    except Exception as e:
+        print(f"EXIF时间提取失败: {e}")
+
+    # 回退：直接搜索文件字节中的时间串（小米等手机将时间存入 MakerNote）
+    try:
+        with open(video_file, 'rb') as f:
+            data = f.read()
+        m = re.search(rb'\d{4}:\d{2}:\d{2} \d{2}:\d{2}:\d{2}', data)
+        if m:
+            time_str = m.group(0).decode('ascii')
+            dt = _parse_datetime(time_str)
+            if dt is not None:
+                utc_time = dt + timedelta(hours=utc_offset_hours)
+                print(f"✓ 从文件字节提取到时间: {time_str} -> UTC {utc_time}")
+                return utc_time
+    except Exception as e:
+        print(f"文件字节时间提取失败: {e}")
+
+    return None
+
 
 def _try_ffprobe_time(video_file):
     """使用 ffprobe 读取视频元数据中的时间字段"""
@@ -244,14 +290,15 @@ def _try_mutagen_time(video_file):
 
 
 def extract_creation_time(video_file, filename_patterns=None) -> Optional[datetime]:
-    """提取视频创建时间，返回 UTC 时间（datetime）或 None。
+    """提取视频/图片创建时间，返回 UTC 时间（datetime）或 None。
 
     提取策略按优先级依次为：
       1. 从文件名提取（需提供 filename_patterns，视为北京时间转 UTC）
-      2. ffprobe 读取视频元数据
-      3. 文件系统时间戳（视为北京时间转 UTC）
-      4. moviepy 读取视频元数据
-      5. mutagen 读取 MP4 元数据
+      2. 图片 EXIF 拍摄时间（视为北京时间转 UTC）
+      3. ffprobe 读取视频元数据
+      4. 文件系统时间戳（视为北京时间转 UTC）
+      5. moviepy 读取视频元数据
+      6. mutagen 读取 MP4 元数据
     """
 
     print(f"尝试提取创建时间: {video_file}")
@@ -263,25 +310,31 @@ def extract_creation_time(video_file, filename_patterns=None) -> Optional[dateti
             print(f"✓ 从文件名提取到时间: {creation_time}")
             return creation_time
 
-    # 方法 2：ffprobe
+    # 方法 2：图片 EXIF 拍摄时间
+    creation_time = _try_exif_time(video_file)
+    if creation_time:
+        print(f"✓ 使用EXIF获取到创建时间: {creation_time}")
+        return creation_time
+
+    # 方法 3：ffprobe
     creation_time = _try_ffprobe_time(video_file)
     if creation_time:
         print(f"✓ 使用ffprobe获取到创建时间: {creation_time}")
         return creation_time
 
-    # 方法 3：文件系统时间戳
+    # 方法 4：文件系统时间戳
     creation_time = _try_filesystem_time(video_file)
     if creation_time:
         print(f"✓ 使用文件系统时间: {creation_time}")
         return creation_time
 
-    # 方法 4：moviepy
+    # 方法 5：moviepy
     creation_time = _try_moviepy_time(video_file)
     if creation_time:
         print(f"✓ 使用moviepy获取到创建时间: {creation_time}")
         return creation_time
 
-    # 方法 5：mutagen
+    # 方法 6：mutagen
     creation_time = _try_mutagen_time(video_file)
     if creation_time:
         print(f"✓ 使用mutagen获取到创建时间: {creation_time}")
