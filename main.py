@@ -49,7 +49,7 @@ def select_track_file(input_dir, preferred_exts=('.kml', '.gpx', '.fit')):
         print("输入无效，请重新输入。")
 
 
-def main(input_dir='input', output_dir='output', workers=None, filename_pattern=None, track_file=None):
+def main(input_dir='input', output_dir='output', workers=None, filename_patterns=None, track_file=None):
     # 并发度默认使用 CPU 核心数
     if workers is None:
         workers = multiprocessing.cpu_count()
@@ -100,7 +100,7 @@ def main(input_dir='input', output_dir='output', workers=None, filename_pattern=
     for video_file in video_files:
         input_video = os.path.join(input_dir, video_file)
         # 获取视频创建时间并格式化为文件名前缀
-        video_time = extract_creation_time(input_video, filename_pattern)
+        video_time = extract_creation_time(input_video, filename_patterns)
         if video_time:
             time_prefix = video_time.strftime("%Y%m%d_%H%M%S")
             output_filename = f"{time_prefix}_{video_file}"
@@ -147,13 +147,13 @@ if __name__ == "__main__":
         help="并发处理视频的并发度，默认: CPU 核心数 (%d)" % multiprocessing.cpu_count(),
     )
     parser.add_argument(
-        "-p", "--filename-pattern", default=None,
-        help="文件名模式，不含扩展名，用于从文件名中提取时间，默认: None。"
-             "例如'VID_%%Y%%m%%d_%%H%%M%%S'",
+        "-p", "--filename-patterns", nargs='+', default=None,
+        help="文件名模式（可传多个），不含扩展名，用于从文件名中提取时间，默认: None。"
+             "例如'VID_%%Y%%m%%d_%%H%%M%%S'，多个模式用空格分隔",
     )
     parser.add_argument(
         "-t", "--track-file", default=None,
         help="指定轨迹文件路径（.kml/.gpx/.fit），不指定则自动在输入目录查找",
     )
     args = parser.parse_args()
-    main(args.input_dir, args.output_dir, args.workers, args.filename_pattern, args.track_file)
+    main(args.input_dir, args.output_dir, args.workers, args.filename_patterns, args.track_file)

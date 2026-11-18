@@ -66,10 +66,13 @@ def _parse_datetime(time_str):
 # 提取创建时间
 # ---------------------------------------------------------------------------
 
-def _try_filename_time(video_file, filename_pattern, utc_offset_hours=-8):
-    """从文件名中按正则匹配提取时间，pattern 格式不包含扩展名，例如 'VID_%Y%m%d_%H%M%S'。
+def _try_filename_time(video_file, filename_patterns, utc_offset_hours=-8):
+    """从文件名中按正则匹配提取时间，支持单个 pattern 或 pattern 列表。
     会在文件名（不含扩展名）中搜索匹配部分，提取后视为北京时间并转换为 UTC。
-    返回 UTC 时间的 datetime 对象或 None。"""
+    遍历所有 pattern，遇到第一个匹配成功即返回；返回 UTC 时间的 datetime 对象或 None。"""
+    if isinstance(filename_patterns, str):
+        filename_patterns = [filename_patterns]
+
     # 将 strptime 格式的模式转换为正则表达式
     directive_to_regex = {
         '%Y': r'\d{4}', '%m': r'\d{2}', '%d': r'\d{2}',
@@ -77,26 +80,31 @@ def _try_filename_time(video_file, filename_pattern, utc_offset_hours=-8):
         '%f': r'\d+', '%y': r'\d{2}', '%j': r'\d{3}',
         '%I': r'\d{2}', '%p': r'[APap][Mm]', '%Z': r'[A-Za-z]+',
     }
-    regex_pattern = re.escape(filename_pattern)
-    for directive, regex_repl in directive_to_regex.items():
-        regex_pattern = regex_pattern.replace(re.escape(directive), regex_repl)
 
     video_file_basename_noext = os.path.splitext(os.path.basename(video_file))[0]
-    match = re.search(regex_pattern, video_file_basename_noext)
-    if not match:
-        print(f"文件名中未匹配到时间模式: {video_file_basename_noext}")
-        return None
 
-    matched_str = match.group(0)
-    try:
-        extracted_time = datetime.strptime(matched_str, filename_pattern)
-        print(f"从文件名提取时间: {extracted_time}")
-        utc_time = extracted_time + timedelta(hours=utc_offset_hours)
-        print(f"转换为UTC时间: {utc_time}")
-        return utc_time
-    except ValueError as e:
-        print(f"无法从文件名解析时间: {matched_str}, 错误信息: {e}")
-        return None
+    for filename_pattern in filename_patterns:
+        regex_pattern = re.escape(filename_pattern)
+        for directive, regex_repl in directive_to_regex.items():
+            regex_pattern = regex_pattern.replace(re.escape(directive), regex_repl)
+
+        match = re.search(regex_pattern, video_file_basename_noext)
+        if not match:
+            continue
+
+        matched_str = match.group(0)
+        try:
+            extracted_time = datetime.strptime(matched_str, filename_pattern)
+            print(f"从文件名提取时间: {extracted_time}")
+            utc_time = extracted_time + timedelta(hours=utc_offset_hours)
+            print(f"转换为UTC时间: {utc_time}")
+            return utc_time
+        except ValueError as e:
+            print(f"无法从文件名解析时间: {matched_str}, 错误信息: {e}")
+            continue
+
+    print(f"文件名中未匹配到任何时间模式: {video_file_basename_noext}")
+    return None
 
 def _try_ffprobe_time(video_file):
     """使用 ffprobe 读取视频元数据中的时间字段"""
@@ -237,11 +245,11 @@ def _try_mutagen_time(video_file):
     return None
 
 
-def extract_creation_time(video_file, filename_pattern=None) -> Optional[datetime]:
+def extract_creation_time(video_file, filename_patterns=None) -> Optional[datetime]:
     """提取视频创建时间，返回 UTC 时间（datetime）或 None。
 
     提取策略按优先级依次为：
-      1. 从文件名提取（需提供 filename_pattern，视为北京时间转 UTC）
+      1. 从文件名提取（需提供 filename_patterns，视为北京时间转 UTC）
       2. ffprobe 读取视频元数据
       3. 文件系统时间戳（视为北京时间转 UTC）
       4. moviepy 读取视频元数据
@@ -251,8 +259,8 @@ def extract_creation_time(video_file, filename_pattern=None) -> Optional[datetim
     print(f"尝试提取创建时间: {video_file}")
 
     # 方法 1：从文件名提取
-    if filename_pattern:
-        creation_time = _try_filename_time(video_file, filename_pattern)
+    if filename_patterns:
+        creation_time = _try_filename_time(video_file, filename_patterns)
         if creation_time:
             print(f"✓ 从文件名提取到时间: {creation_time}")
             return creation_time
