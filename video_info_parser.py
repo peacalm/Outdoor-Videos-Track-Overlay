@@ -95,9 +95,8 @@ def _try_filename_time(video_file, filename_patterns, utc_offset_hours=-8):
         matched_str = match.group(0)
         try:
             extracted_time = datetime.strptime(matched_str, filename_pattern)
-            print(f"从文件名提取时间: {extracted_time}")
             utc_time = extracted_time + timedelta(hours=utc_offset_hours)
-            print(f"转换为UTC时间: {utc_time}")
+            print(f"从文件名提取到时间: {extracted_time}. 转换为UTC时间: {utc_time}")
             return utc_time
         except ValueError as e:
             print(f"无法从文件名解析时间: {matched_str}, 错误信息: {e}")
@@ -184,9 +183,8 @@ def _try_filesystem_time(video_file, utc_offset_hours=-8):
                 if hasattr(stat_info, field_name):
                     timestamp = getattr(stat_info, field_name)
                     extracted_time = datetime.fromtimestamp(timestamp)
-                    print(f"使用文件系统{field_desc}: {extracted_time}")
                     utc_time = extracted_time + timedelta(hours=utc_offset_hours)
-                    print(f"转换为UTC时间: {utc_time}")
+                    print(f"使用文件系统{field_desc}: {extracted_time}. 转换为UTC时间: {utc_time}")
                     return utc_time
             except Exception as e:
                 print(f"获取{field_desc}失败: {e}")
